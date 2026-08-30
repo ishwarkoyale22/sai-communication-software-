@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:web"],
+      "port": 3000,
+      "autoPort": true
+    },
+    {
+      "name": "admin",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:admin"],
+      "port": 5173,
+      "autoPort": true
+    },
+    {
+      "name": "staff",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev:staff"],
+      "port": 5174
+    },
+    {
+      "name": "customer-website",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "C:/Users/ishwa/Downloads/Sai-Communication-main (2)/Sai-Communication-main",
+      "port": 3000,
+      "autoPort": true
+    }
+  ]
+}

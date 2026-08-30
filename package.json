@@ -1,0 +1,20 @@
+{
+  "name": "sai-communication-software",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:admin": "npm run dev --workspace=apps/admin",
+    "dev:staff": "npm run dev --workspace=apps/staff",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build:admin": "npm run build --workspace=apps/admin",
+    "build:staff": "npm run build --workspace=apps/staff",
+    "build:web": "npm run build --workspace=apps/web"
+  },
+  "devDependencies": {
+    "supabase": "^2.116.0"
+  }
+}

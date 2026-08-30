@@ -1,0 +1,8 @@
+[{"id":"05aa21af-2b70-4282-a418-371da82a7701","name":"Apple","logo_url":null,"display_order":2,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}, 
+ {"id":"4a34d659-125b-4f6f-ba9c-87523e87e0d9","name":"OnePlus","logo_url":null,"display_order":6,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}, 
+ {"id":"6a7b0889-4ecd-4b7c-9d28-1e4162041a11","name":"Xiaomi","logo_url":null,"display_order":7,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}, 
+ {"id":"a9f2e0f6-7486-4c8d-87d2-c18e2c461ae3","name":"Nokia","logo_url":null,"display_order":8,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}, 
+ {"id":"b3a38b31-dcab-4ea9-bd5e-fc8f52c6a280","name":"Oppo","logo_url":null,"display_order":4,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}, 
+ {"id":"ddc05277-8e29-4d3b-8d0c-d8eaec1aced8","name":"Vivo","logo_url":null,"display_order":3,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}, 
+ {"id":"eb39ae37-456c-4007-b303-47c538f5d95e","name":"Realme","logo_url":null,"display_order":5,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}, 
+ {"id":"ffa246bb-4061-4a45-97ee-59bcf7c0a583","name":"Samsung","logo_url":null,"display_order":1,"is_active":true,"created_at":"2026-08-30T06:52:35.607752+00:00"}]

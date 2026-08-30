@@ -1,0 +1,125 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+  }
+  h1,
+  h2,
+  h3 {
+    @apply font-display;
+  }
+  em {
+    @apply text-primary font-semibold not-italic;
+    font-style: italic;
+  }
+  hr {
+    @apply border-border;
+  }
+}
+
+@layer components {
+  /* ---- Surfaces ---------------------------------------------------- */
+  .card-surface {
+    @apply rounded-card border border-border bg-card;
+    box-shadow: 0 1px 2px rgba(27, 27, 27, 0.03);
+  }
+
+  .hover-glow {
+    @apply relative transition-all duration-300;
+  }
+  .hover-glow:hover {
+    @apply -translate-y-[3px] border-gold shadow-lift;
+  }
+
+  .gold-frame {
+    @apply border border-gold p-2.5;
+  }
+
+  /* ---- Typography utilities ----------------------------------------- */
+  .caption-mono {
+    @apply font-mono text-[9px] uppercase tracking-caption text-muted-foreground;
+  }
+
+  /* ---- Signature motifs ---------------------------------------------- */
+  .medallion-ring {
+    @apply inline-flex items-center gap-2 rounded-full border border-gold px-4 py-1.5;
+  }
+  .medallion-ring-sm {
+    @apply flex h-12 w-12 items-center justify-center rounded-full border border-gold text-gold;
+  }
+  .stat-strip {
+    @apply flex items-center justify-center divide-x divide-border;
+  }
+  .stat-strip > * {
+    @apply px-6 first:pl-0 last:pr-0;
+  }
+  .hairline-band {
+    @apply grid divide-y divide-border rounded-card border border-border sm:grid-cols-2 sm:divide-x sm:divide-y-0 lg:grid-cols-4;
+  }
+
+  /* ---- Buttons: sharp corners, small radius per brief ---------------- */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-btn px-5 py-2.5 text-sm font-semibold tracking-wide transition-colors disabled:opacity-50 disabled:pointer-events-none;
+  }
+  .btn-primary {
+    @apply btn bg-primary text-white hover:bg-primary-glow;
+  }
+  .btn-outline {
+    @apply btn border border-border bg-transparent text-foreground hover:border-gold hover:text-gold;
+  }
+  .btn-secondary {
+    @apply btn bg-secondary text-foreground hover:bg-accent;
+  }
+  .btn-gold {
+    @apply btn bg-gold text-white hover:opacity-90;
+  }
+  .btn-ghost {
+    @apply btn text-muted-foreground hover:text-primary;
+  }
+  .btn-link {
+    @apply inline-flex items-center gap-1 text-sm font-medium text-primary underline-offset-4 hover:underline;
+  }
+
+  /* ---- Form controls --------------------------------------------------- */
+  .input {
+    @apply w-full rounded border border-border bg-card px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary;
+  }
+
+  /* ---- Badges / pills ---------------------------------------------------- */
+  .tag-soft {
+    @apply inline-flex items-center rounded-full bg-secondary px-3 py-1 text-xs font-medium text-foreground;
+  }
+  .badge-gold {
+    @apply inline-flex items-center rounded border border-gold px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-gold;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Hero-only ivory gradient override */
+.hero-band {
+  background: linear-gradient(180deg, #fbf7ee 0%, #f7f2e6 100%);
+}
+
+/* Scroll-reveal (see components/Reveal.tsx) */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px) scale(0.99);
+  transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1), transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.reveal.reveal-visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
