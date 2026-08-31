@@ -3,6 +3,11 @@ import { defineConfig } from 'vite'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Set by the unified Vercel build (see /vercel-build.sh) when this app is
+  // deployed alongside apps/admin from a single project, so it's served at
+  // /staff/* instead of the root — leave unset for local dev / a standalone
+  // deploy, where it defaults to root as before.
+  base: process.env.VITE_BASE_PATH || '/',
   plugins: [react()],
   server: {
     // Honor the PORT env var (set by the dev-preview harness's autoPort

@@ -9,3 +9,6 @@ build/
 *.log
 .DS_Store
 .vercel/
+
+.vercel
+unified-dist/
