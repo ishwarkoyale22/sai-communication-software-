@@ -1,18 +1,42 @@
 import { useEffect, useState } from "react";
-import { formatCurrency, formatDate, formatDateTime, type Customer, type Sale, type Repair, type CustomerNote, type Staff } from "@sai/shared";
+import { formatCurrency, formatDate } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
 import { X } from "lucide-react";
 
+interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email: string | null;
+  address: string | null;
+  total_purchases: number;
+  created_at: string;
+}
+
+interface Sale {
+  id: string;
+  customer_id: string | null;
+  invoice_number: string;
+  total_amount: number;
+  created_at: string;
+}
+
+interface RepairRow {
+  id: string;
+  device_brand: string;
+  device_model: string;
+  status: string;
+  received_at: string;
+}
+
 export function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [search, setSearch] = useState("");
-  const [birthdayFilter, setBirthdayFilter] = useState<"none" | "week" | "month">("none");
   const [selected, setSelected] = useState<Customer | null>(null);
-  const [repairs, setRepairs] = useState<Repair[]>([]);
-  const [notes, setNotes] = useState<(CustomerNote & { staff?: Staff | null })[]>([]);
+  const [repairs, setRepairs] = useState<RepairRow[]>([]);
 
   useEffect(() => {
     load();
@@ -22,25 +46,19 @@ export function Customers() {
     if (!selected) return;
     supabase
       .from("repairs")
-      .select("*")
+      .select("id, device_brand, device_model, status, received_at")
       .eq("customer_id", selected.id)
       .order("received_at", { ascending: false })
-      .then(({ data }) => setRepairs(data ?? []));
-    supabase
-      .from("customer_notes")
-      .select("*, staff:staff(*)")
-      .eq("customer_id", selected.id)
-      .order("created_at", { ascending: false })
-      .then(({ data }: { data: any }) => setNotes(data ?? []));
+      .then(({ data }) => setRepairs((data as RepairRow[]) ?? []));
   }, [selected]);
 
   async function load() {
     const [{ data: c }, { data: s }] = await Promise.all([
       supabase.from("customers").select("*").order("name"),
-      supabase.from("sales").select("*"),
+      supabase.from("sales").select("id, customer_id, invoice_number, total_amount, created_at"),
     ]);
-    setCustomers(c ?? []);
-    setSales(s ?? []);
+    setCustomers((c as Customer[]) ?? []);
+    setSales((s as Sale[]) ?? []);
   }
 
   function spendFor(id: string) {
@@ -52,16 +70,6 @@ export function Customers() {
 
   const filtered = customers.filter((c) => {
     if (search && !c.name.toLowerCase().includes(search.toLowerCase()) && !c.phone?.includes(search)) return false;
-    if (birthdayFilter !== "none" && c.birthday) {
-      const today = new Date();
-      const bday = new Date(c.birthday);
-      bday.setFullYear(today.getFullYear());
-      const diffDays = (bday.getTime() - today.getTime()) / 86400000;
-      const window = birthdayFilter === "week" ? 7 : 30;
-      if (diffDays < 0 || diffDays > window) return false;
-    } else if (birthdayFilter !== "none") {
-      return false;
-    }
     return true;
   });
 
@@ -74,7 +82,7 @@ export function Customers() {
             Name: c.name,
             Phone: c.phone,
             Email: c.email,
-            Birthday: c.birthday,
+            Address: c.address,
             Purchases: countFor(c.id),
             "Total Spend": spendFor(c.id),
           }))}
@@ -82,19 +90,12 @@ export function Customers() {
         />
       </div>
 
-      <div className="flex items-center gap-2">
-        <input
-          placeholder="Search name or phone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="input w-64"
-        />
-        <select className="input w-auto" value={birthdayFilter} onChange={(e) => setBirthdayFilter(e.target.value as any)}>
-          <option value="none">All customers</option>
-          <option value="week">Birthday this week</option>
-          <option value="month">Birthday this month</option>
-        </select>
-      </div>
+      <input
+        placeholder="Search name or phone..."
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        className="input w-64"
+      />
 
       <div className="card overflow-x-auto">
         <table className="table-base">
@@ -102,7 +103,7 @@ export function Customers() {
             <tr>
               <th>Name</th>
               <th>Phone</th>
-              <th>Birthday</th>
+              <th>Email</th>
               <th className="text-right">Purchases</th>
               <th className="text-right">Total Spend</th>
             </tr>
@@ -112,7 +113,7 @@ export function Customers() {
               <tr key={c.id} className="cursor-pointer" onClick={() => setSelected(c)}>
                 <td className="font-medium text-brand-primary">{c.name}</td>
                 <td>{c.phone}</td>
-                <td>{c.birthday ? formatDate(c.birthday) : "-"}</td>
+                <td className="text-gray-500">{c.email ?? "-"}</td>
                 <td className="text-right">{countFor(c.id)}</td>
                 <td className="text-right">{formatCurrency(spendFor(c.id))}</td>
               </tr>
@@ -141,9 +142,6 @@ export function Customers() {
               <p>📞 {selected.phone}</p>
               {selected.email && <p>✉️ {selected.email}</p>}
               {selected.address && <p>📍 {selected.address}</p>}
-              {selected.birthday && <p>🎂 {formatDate(selected.birthday)}</p>}
-              {selected.gst_number && <p>GSTIN: {selected.gst_number}</p>}
-              {selected.notes && <p className="italic text-gray-500">Notes: {selected.notes}</p>}
             </div>
             <div className="mb-2 text-xs font-semibold uppercase text-gray-400">Purchase History</div>
             <div className="mb-4 max-h-40 space-y-1 overflow-y-auto">
@@ -161,29 +159,16 @@ export function Customers() {
               )}
             </div>
 
-            <div className="mb-2 text-xs font-semibold uppercase text-gray-400">Services Taken (Repairs)</div>
-            <div className="mb-4 max-h-40 space-y-1 overflow-y-auto">
+            <div className="mb-2 text-xs font-semibold uppercase text-gray-400">Repairs</div>
+            <div className="max-h-40 space-y-1 overflow-y-auto">
               {repairs.map((r) => (
                 <div key={r.id} className="flex items-center justify-between text-sm">
-                  <span>{r.device_name}</span>
+                  <span>{r.device_brand} {r.device_model}</span>
                   <StatusPill status={r.status} />
                   <span className="text-gray-500">{formatDate(r.received_at)}</span>
                 </div>
               ))}
               {repairs.length === 0 && <p className="text-sm text-gray-400">No repairs on file</p>}
-            </div>
-
-            <div className="mb-2 text-xs font-semibold uppercase text-gray-400">Staff Notes</div>
-            <div className="max-h-40 space-y-2 overflow-y-auto">
-              {notes.map((n) => (
-                <div key={n.id} className="rounded bg-gray-50 p-2 text-sm">
-                  <p className="text-gray-700">{n.note}</p>
-                  <p className="mt-0.5 text-xs text-gray-400">
-                    {n.staff?.name ?? "Staff"} · {formatDateTime(n.created_at)}
-                  </p>
-                </div>
-              ))}
-              {notes.length === 0 && <p className="text-sm text-gray-400">No staff notes yet</p>}
             </div>
           </div>
         </div>

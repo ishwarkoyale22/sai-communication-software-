@@ -1,23 +1,52 @@
 import { useEffect, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from "recharts";
-import { formatCurrency, type Sale, type SaleItem, type Product, type Staff } from "@sai/shared";
+import { formatCurrency } from "@sai/shared";
 import { supabase } from "../lib/supabase";
+
+interface Sale {
+  id: string;
+  staff_id: string | null;
+  total_amount: number;
+  final_amount: number;
+  created_at: string;
+}
+interface SaleItemRow {
+  sale_id: string;
+  inventory_id: string | null;
+  item_name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+}
+interface Staff {
+  id: string;
+  name: string;
+}
+interface InventoryRow {
+  id: string;
+  category: string | null;
+}
 
 export function Analytics() {
   const [sales, setSales] = useState<Sale[]>([]);
-  const [items, setItems] = useState<(SaleItem & { product?: Product })[]>([]);
+  const [items, setItems] = useState<SaleItemRow[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [inventoryById, setInventoryById] = useState<Record<string, InventoryRow>>({});
 
   useEffect(() => {
     (async () => {
-      const [{ data: s }, { data: i }, { data: st }] = await Promise.all([
-        supabase.from("sales").select("*").order("created_at"),
-        supabase.from("sale_items").select("*, product:products(*)"),
-        supabase.from("staff").select("*"),
+      const [{ data: s }, { data: i }, { data: st }, { data: inv }] = await Promise.all([
+        supabase.from("sales").select("id, staff_id, total_amount, final_amount, created_at").order("created_at"),
+        supabase.from("sales_items").select("sale_id, inventory_id, item_name, quantity, unit_price, total_price"),
+        supabase.from("staff").select("id, name"),
+        supabase.from("inventory").select("id, category"),
       ]);
-      setSales(s ?? []);
-      setItems((i as any) ?? []);
-      setStaff(st ?? []);
+      setSales((s as Sale[]) ?? []);
+      setItems((i as SaleItemRow[]) ?? []);
+      setStaff((st as Staff[]) ?? []);
+      const map: Record<string, InventoryRow> = {};
+      for (const row of (inv as InventoryRow[]) ?? []) map[row.id] = row;
+      setInventoryById(map);
     })();
   }, []);
 
@@ -25,17 +54,17 @@ export function Analytics() {
     sales.reduce<Record<string, { date: string; revenue: number }>>((acc, s) => {
       const day = s.created_at.slice(0, 10);
       acc[day] = acc[day] ?? { date: day, revenue: 0 };
-      acc[day].revenue += Number(s.total_amount);
+      acc[day].revenue += Number(s.final_amount ?? s.total_amount);
       return acc;
     }, {})
   );
 
   const byProduct = Object.values(
     items.reduce<Record<string, { name: string; revenue: number; qty: number }>>((acc, i) => {
-      const name = i.product?.name ?? "Unknown";
+      const name = i.item_name;
       acc[name] = acc[name] ?? { name, revenue: 0, qty: 0 };
-      acc[name].revenue += i.qty * i.unit_price;
-      acc[name].qty += i.qty;
+      acc[name].revenue += i.total_price;
+      acc[name].qty += i.quantity;
       return acc;
     }, {})
   )
@@ -43,10 +72,10 @@ export function Analytics() {
     .slice(0, 8);
 
   const byCategory = Object.values(
-    items.reduce<Record<string, { category: string; margin: number }>>((acc, i) => {
-      const cat = i.product?.category ?? "Other";
-      acc[cat] = acc[cat] ?? { category: cat, margin: 0 };
-      acc[cat].margin += (i.unit_price - i.purchase_price) * i.qty;
+    items.reduce<Record<string, { category: string; revenue: number }>>((acc, i) => {
+      const cat = (i.inventory_id ? inventoryById[i.inventory_id]?.category : null) ?? "Other";
+      acc[cat] = acc[cat] ?? { category: cat, revenue: 0 };
+      acc[cat].revenue += i.total_price;
       return acc;
     }, {})
   );
@@ -55,7 +84,7 @@ export function Analytics() {
     sales.reduce<Record<string, { name: string; revenue: number }>>((acc, s) => {
       const name = staff.find((st) => st.id === s.staff_id)?.name ?? "Unassigned";
       acc[name] = acc[name] ?? { name, revenue: 0 };
-      acc[name].revenue += Number(s.total_amount);
+      acc[name].revenue += Number(s.final_amount ?? s.total_amount);
       return acc;
     }, {})
   );
@@ -63,9 +92,6 @@ export function Analytics() {
   return (
     <div className="space-y-5">
       <h1 className="text-lg font-semibold text-gray-800">Analytics</h1>
-      <p className="rounded-md bg-amber-50 px-3 py-1.5 text-xs text-brand-warning">
-        Phase 2 preview — live data, basic charts. Deeper forecasting/segmentation ships in Phase 2.
-      </p>
 
       <div className="grid grid-cols-2 gap-4">
         <div className="card p-4">
@@ -94,13 +120,13 @@ export function Analytics() {
         </div>
 
         <div className="card p-4">
-          <div className="mb-2 text-sm font-semibold text-gray-700">Profit Margin by Category</div>
+          <div className="mb-2 text-sm font-semibold text-gray-700">Revenue by Category</div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={byCategory}>
               <XAxis dataKey="category" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} />
               <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-              <Bar dataKey="margin" fill="#16A34A" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="revenue" fill="#16A34A" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

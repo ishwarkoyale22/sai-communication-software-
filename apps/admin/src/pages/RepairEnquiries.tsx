@@ -1,24 +1,37 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { formatDateTime, type RepairEnquiry, type Repair } from "@sai/shared";
-import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
+import { supabase } from "../lib/supabase";
 import { ArrowRight, Wrench } from "lucide-react";
+
+interface RepairEnquiry {
+  id: string;
+  customer_name: string;
+  phone: string;
+  email: string | null;
+  phone_brand: string;
+  phone_model: string;
+  problem_type: string;
+  description: string | null;
+  status: string;
+  created_at: string;
+}
+
+interface LinkedRepair {
+  id: string;
+  enquiry_id: string;
+  status: string;
+}
 
 export function RepairEnquiries() {
   const [enquiries, setEnquiries] = useState<RepairEnquiry[]>([]);
-  // Keyed by repair_enquiry_id, so we can tell at a glance which enquiries
-  // already have a linked work order and which are still "New".
-  const [repairsByEnquiry, setRepairsByEnquiry] = useState<Record<string, Repair>>({});
+  const [repairsByEnquiry, setRepairsByEnquiry] = useState<Record<string, LinkedRepair>>({});
   const [creatingId, setCreatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     load();
-    // New repair enquiries submitted on the public website land here
-    // immediately; also refresh when a repair gets created/updated so the
-    // "Converted" state stays in sync even if created from elsewhere.
     const channel = supabase
       .channel("repair-enquiries-page")
       .on("postgres_changes", { event: "*", schema: "public", table: "repair_enquiries" }, load)
@@ -32,7 +45,7 @@ export function RepairEnquiries() {
   async function load() {
     const [{ data: enqData, error: enqErr }, { data: repairData, error: repErr }] = await Promise.all([
       supabase.from("repair_enquiries").select("*").order("created_at", { ascending: false }),
-      supabase.from("repairs").select("*").not("repair_enquiry_id", "is", null),
+      supabase.from("repairs").select("id, enquiry_id, status").not("enquiry_id", "is", null),
     ]);
     if (enqErr) {
       setError(`Failed to load repair enquiries: ${enqErr.message}`);
@@ -43,10 +56,10 @@ export function RepairEnquiries() {
       return;
     }
     setError(null);
-    setEnquiries(enqData ?? []);
-    const map: Record<string, Repair> = {};
-    for (const r of (repairData as Repair[]) ?? []) {
-      if (r.repair_enquiry_id) map[r.repair_enquiry_id] = r;
+    setEnquiries((enqData as RepairEnquiry[]) ?? []);
+    const map: Record<string, LinkedRepair> = {};
+    for (const r of (repairData as LinkedRepair[]) ?? []) {
+      if (r.enquiry_id) map[r.enquiry_id] = r;
     }
     setRepairsByEnquiry(map);
   }
@@ -58,25 +71,24 @@ export function RepairEnquiries() {
       const { data, error: insertErr } = await supabase
         .from("repairs")
         .insert({
-          repair_number: enquiry.enquiry_number.replace(/^RE-/, "RPR-"),
-          repair_enquiry_id: enquiry.id,
-          device_name: `${enquiry.phone_brand} ${enquiry.phone_model}`.trim(),
-          issue_description: enquiry.description || enquiry.problem_type,
+          enquiry_id: enquiry.id,
+          customer_name: enquiry.customer_name,
+          phone: enquiry.phone,
+          device_brand: enquiry.phone_brand,
+          device_model: enquiry.phone_model,
+          problem: enquiry.description || enquiry.problem_type,
           status: "received",
-          channel: "online",
         })
         .select()
         .single();
 
       if (insertErr) {
-        // Same principle as the Add Staff fix: surface the real database
-        // error, never silently fail or pretend it worked.
         setError(`Failed to create repair: ${insertErr.message}`);
         return;
       }
 
       if (data) {
-        setRepairsByEnquiry((prev) => ({ ...prev, [enquiry.id]: data as Repair }));
+        setRepairsByEnquiry((prev) => ({ ...prev, [enquiry.id]: data as LinkedRepair }));
       }
     } catch (err: any) {
       setError(err?.message || "Failed to create repair. Please try again.");
@@ -96,7 +108,6 @@ export function RepairEnquiries() {
         </h1>
         <ExportExcelButton
           rows={enquiries.map((e) => ({
-            "Enquiry #": e.enquiry_number,
             Name: e.customer_name,
             Phone: e.phone,
             Email: e.email,
@@ -110,7 +121,7 @@ export function RepairEnquiries() {
         />
       </div>
       <p className="text-sm text-gray-500">
-        Submitted from the public website's repair form. Create a repair work order to start tracking it.
+        Submitted from the public website's repair form. Create a repair to start tracking it.
       </p>
 
       {error && (
@@ -121,7 +132,6 @@ export function RepairEnquiries() {
         <table className="table-base">
           <thead>
             <tr>
-              <th>Enquiry #</th>
               <th>Customer</th>
               <th>Phone / Email</th>
               <th>Device</th>
@@ -136,7 +146,6 @@ export function RepairEnquiries() {
               const linkedRepair = repairsByEnquiry[e.id];
               return (
                 <tr key={e.id}>
-                  <td className="font-mono text-xs">{e.enquiry_number}</td>
                   <td className="font-medium">{e.customer_name}</td>
                   <td>
                     {e.phone}
@@ -146,7 +155,7 @@ export function RepairEnquiries() {
                     {e.phone_brand} {e.phone_model}
                   </td>
                   <td>{e.problem_type}</td>
-                  <td className="text-gray-500">{formatDateTime(e.created_at)}</td>
+                  <td className="text-gray-500">{new Date(e.created_at).toLocaleString("en-IN")}</td>
                   <td>
                     {linkedRepair ? (
                       <StatusPill status="approved" label="Converted" />
@@ -161,7 +170,6 @@ export function RepairEnquiries() {
                         className="inline-flex items-center gap-1 text-xs font-medium text-brand-primary hover:underline"
                       >
                         <Wrench className="size-3.5" />
-                        {linkedRepair.repair_number}
                         <span className="text-gray-400">({linkedRepair.status})</span>
                         <ArrowRight className="size-3" />
                       </Link>
@@ -180,7 +188,7 @@ export function RepairEnquiries() {
             })}
             {enquiries.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-gray-400">
+                <td colSpan={7} className="py-8 text-center text-gray-400">
                   No repair enquiries yet
                 </td>
               </tr>

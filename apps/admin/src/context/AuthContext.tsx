@@ -47,7 +47,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // "@staff.internal" (including on network errors), which made every
     // non-staff login an admin login. That was a real security hole; this
     // is the correct, minimal check.
-    const { data } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+    const { data, error } = await supabase.from("profiles").select("role").eq("id", userId).maybeSingle();
+    // Diagnostic only — no token/password/session content, just booleans
+    // and the (already publicly-known) user id, so this is safe to leave
+    // in the console while we're tracking down the write-access bug.
+    console.info("[auth] checkAdmin:", { userId, profileFound: !!data, role: data?.role, error: error?.message });
     setIsAdmin(data?.role === "admin");
     setLoading(false);
   }
@@ -56,11 +60,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
       if (error) {
+        console.warn("[auth] signInWithPassword failed:", error.message);
         return { error: error.message };
       }
+      console.info("[auth] signInWithPassword succeeded:", {
+        userId: data.user?.id,
+        hasSession: !!data.session,
+        sessionExpiresAt: data.session?.expires_at,
+      });
       if (data.user) {
         await checkAdmin(data.user.id);
       }
+      // Confirm the session actually round-tripped through persistence —
+      // if this ever logs hasSession:false right after a successful sign-
+      // in above, the client isn't retaining the session it was just given.
+      const { data: after } = await supabase.auth.getSession();
+      console.info("[auth] getSession() immediately after sign-in:", { hasSession: !!after.session });
       return {};
     } catch (err: any) {
       return { error: err?.message || "An unexpected error occurred during sign in." };

@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
-import { type Service } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { StatusPill } from "../components/StatusPill";
 import { Plus, Trash2 } from "lucide-react";
 
-const emptyForm = { name: "", description: "" };
+interface Service {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number | null;
+  is_active: boolean;
+}
+
+const emptyForm = { name: "", description: "", price: 0 };
 
 export function ServiceManagement() {
   const [services, setServices] = useState<Service[]>([]);
@@ -13,17 +20,23 @@ export function ServiceManagement() {
 
   useEffect(() => {
     load();
+    const channel = supabase
+      .channel("services-page")
+      .on("postgres_changes", { event: "*", schema: "public", table: "services" }, load)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   async function load() {
-    const { data } = await supabase.from("services").select("*").order("sort_order");
-    setServices(data ?? []);
+    const { data } = await supabase.from("services").select("*").order("name");
+    setServices((data as Service[]) ?? []);
   }
 
   async function addService() {
     if (!form.name) return;
-    const nextSort = (services.at(-1)?.sort_order ?? 0) + 1;
-    await supabase.from("services").insert({ ...form, sort_order: nextSort });
+    await supabase.from("services").insert({ name: form.name, description: form.description || null, price: form.price || null, is_active: true });
     setForm(emptyForm);
     setShowForm(false);
     load();

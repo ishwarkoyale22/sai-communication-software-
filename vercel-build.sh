@@ -1,20 +1,17 @@
 #!/usr/bin/env bash
-# Unified build for a single Vercel deployment serving both apps/admin
-# (at the site root, "/") and apps/staff (under "/staff/*"), sharing one
-# Supabase-backed database/session model, one domain.
+# Single-app build: Admin Panel and Staff Portal now live in one React app
+# (apps/admin) sharing one login page and one router, split only by
+# role-gated routes ("/" = admin, "/portal" = staff) — see apps/admin/src/App.tsx.
+# apps/staff is no longer part of the deployed site (superseded by
+# apps/admin/src/staff/*); its source is kept for reference only.
 set -euo pipefail
 
-echo "==> Building admin (base: /)"
-VITE_BASE_PATH="/" npm run build --workspace=apps/admin
+echo "==> Building admin (includes Staff Portal at /portal)"
+npm run build --workspace=apps/admin
 
-echo "==> Building staff (base: /staff/)"
-VITE_BASE_PATH="/staff/" npm run build --workspace=apps/staff
-
-echo "==> Assembling unified output"
+echo "==> Assembling output"
 rm -rf unified-dist
 mkdir -p unified-dist
 cp -r apps/admin/dist/. unified-dist/
-mkdir -p unified-dist/staff
-cp -r apps/staff/dist/. unified-dist/staff/
 
-echo "==> Done. unified-dist/ contains both apps."
+echo "==> Done. unified-dist/ contains the single unified app."

@@ -1,58 +1,48 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ShoppingCart, Package, Wrench, LogOut } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { ShoppingCart, Package, FileText, Clock, CalendarDays, ListChecks, Star, History, LogOut } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
+
+const TILES = [
+  { to: "/attendance", label: "My Attendance", icon: Clock },
+  { to: "/leave", label: "Leave", icon: CalendarDays },
+  { to: "/tasks", label: "My Tasks", icon: ListChecks },
+  { to: "/client-reports", label: "Client Reports", icon: FileText },
+  { to: "/reviews", label: "Customer Reviews", icon: Star },
+  { to: "/activity", label: "My Activity", icon: History },
+  { to: "/billing", label: "New Sale", icon: ShoppingCart },
+  { to: "/inventory", label: "Check Stock", icon: Package },
+];
 
 export function Home() {
   const { staff, openAttendance, clockOut } = useStaffAuth();
-  const [todaySales, setTodaySales] = useState(0);
-
-  useEffect(() => {
-    if (!staff) return;
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    supabase
-      .from("sales")
-      .select("id", { count: "exact", head: true })
-      .eq("staff_id", staff.id)
-      .gte("created_at", todayStart.toISOString())
-      .then(({ count }) => setTodaySales(count ?? 0));
-  }, [staff]);
 
   return (
     <div className="space-y-4">
       <div className="card p-4">
-        <div className="text-xs font-medium text-gray-500">Today's Sales</div>
-        <div className="mt-1 text-3xl font-semibold text-gray-800">{todaySales}</div>
-        {openAttendance && (
-          <div className="mt-1 text-xs text-brand-success">
-            Clocked in at {new Date(openAttendance.clock_in).toLocaleTimeString("en-IN")}
+        <div className="text-xs font-medium text-gray-500">Welcome</div>
+        <div className="mt-1 text-lg font-semibold text-gray-800">{staff?.name}</div>
+        <div className="mt-1 flex items-center justify-between">
+          <div className={`flex items-center gap-1.5 text-xs font-medium ${openAttendance ? "text-brand-success" : "text-gray-400"}`}>
+            <Clock size={13} />
+            {openAttendance
+              ? `Clocked in at ${new Date(openAttendance.clock_in).toLocaleTimeString("en-IN")}`
+              : "Not clocked in"}
           </div>
-        )}
+          {openAttendance && (
+            <button onClick={() => clockOut()} className="flex items-center gap-1 text-xs font-medium text-brand-danger">
+              <LogOut size={13} /> Clock Out
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <Link to="/billing" className="card flex flex-col items-center justify-center gap-2 p-6">
-          <ShoppingCart className="text-brand-primary" size={28} />
-          <span className="text-sm font-medium">New Sale</span>
-        </Link>
-        <Link to="/inventory" className="card flex flex-col items-center justify-center gap-2 p-6">
-          <Package className="text-brand-primary" size={28} />
-          <span className="text-sm font-medium">Check Stock</span>
-        </Link>
-        <div className="card flex flex-col items-center justify-center gap-2 p-6 opacity-50">
-          <Wrench size={28} />
-          <span className="text-sm font-medium">My Repairs</span>
-        </div>
-        <button
-          onClick={() => clockOut()}
-          disabled={!openAttendance}
-          className="card flex flex-col items-center justify-center gap-2 p-6 disabled:opacity-40"
-        >
-          <LogOut className="text-brand-danger" size={28} />
-          <span className="text-sm font-medium">Clock Out</span>
-        </button>
+        {TILES.map(({ to, label, icon: Icon }) => (
+          <Link key={to} to={to} className="card flex flex-col items-center justify-center gap-2 p-5">
+            <Icon className="text-brand-primary" size={26} />
+            <span className="text-center text-sm font-medium">{label}</span>
+          </Link>
+        ))}
       </div>
     </div>
   );

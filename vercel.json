@@ -3,7 +3,6 @@
   "buildCommand": "bash vercel-build.sh",
   "outputDirectory": "unified-dist",
   "rewrites": [
-    { "source": "/staff/(.*)", "destination": "/staff/index.html" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

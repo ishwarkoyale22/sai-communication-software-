@@ -1,9 +1,21 @@
 import { useEffect, useState } from "react";
-import { formatDateTime, type Review, type ReviewStatus } from "@sai/shared";
+import { formatDateTime } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Star, Check, X } from "lucide-react";
+import { Star, Check, X, Heart } from "lucide-react";
+
+type ReviewStatus = "pending" | "approved" | "rejected";
+interface Review {
+  id: string;
+  customer_name: string;
+  phone: string | null;
+  rating: number;
+  comment: string | null;
+  status: ReviewStatus;
+  is_featured?: boolean;
+  created_at: string;
+}
 
 export function Reviews() {
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -22,11 +34,16 @@ export function Reviews() {
 
   async function load() {
     const { data } = await supabase.from("reviews").select("*").order("created_at", { ascending: false });
-    setReviews(data ?? []);
+    setReviews((data as Review[]) ?? []);
   }
 
   async function setStatus(id: string, status: ReviewStatus) {
     await supabase.from("reviews").update({ status }).eq("id", id);
+  }
+
+  async function toggleFeatured(r: Review) {
+    await supabase.from("reviews").update({ is_featured: !r.is_featured }).eq("id", r.id);
+    load();
   }
 
   const filtered = statusFilter === "all" ? reviews : reviews.filter((r) => r.status === statusFilter);
@@ -82,16 +99,26 @@ export function Reviews() {
             </div>
             {r.comment && <p className="mt-2 text-sm text-gray-600">{r.comment}</p>}
             <p className="mt-2 text-xs text-gray-400">{formatDateTime(r.created_at)}</p>
-            {r.status === "pending" && (
-              <div className="mt-3 flex gap-2">
-                <button className="btn-primary flex-1 !py-1.5 text-xs" onClick={() => setStatus(r.id, "approved")}>
-                  <Check size={13} /> Approve
+            <div className="mt-3 flex gap-2">
+              {r.status === "pending" ? (
+                <>
+                  <button className="btn-primary flex-1 !py-1.5 text-xs" onClick={() => setStatus(r.id, "approved")}>
+                    <Check size={13} /> Approve
+                  </button>
+                  <button className="btn-secondary flex-1 !py-1.5 text-xs" onClick={() => setStatus(r.id, "rejected")}>
+                    <X size={13} /> Reject
+                  </button>
+                </>
+              ) : (
+                <button
+                  className={`btn-secondary flex-1 !py-1.5 text-xs ${r.is_featured ? "text-brand-danger" : ""}`}
+                  onClick={() => toggleFeatured(r)}
+                >
+                  <Heart size={13} className={r.is_featured ? "fill-current" : ""} />
+                  {r.is_featured ? "Unfeature" : "Feature on site"}
                 </button>
-                <button className="btn-secondary flex-1 !py-1.5 text-xs" onClick={() => setStatus(r.id, "rejected")}>
-                  <X size={13} /> Reject
-                </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ))}
         {filtered.length === 0 && <p className="col-span-full py-8 text-center text-gray-400">No reviews found</p>}

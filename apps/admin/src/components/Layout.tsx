@@ -9,6 +9,7 @@ import {
   ShoppingBag,
   CreditCard,
   UserCog,
+  ListChecks,
   FileUp,
   BarChart3,
   LogOut,
@@ -47,6 +48,7 @@ const NAV_GROUPS: {
       { to: "/client-reports", label: "Client Reports", icon: FileText },
       { to: "/reviews", label: "Reviews", icon: Star },
       { to: "/staff", label: "Staff", icon: UserCog },
+      { to: "/staff-portal", label: "Staff Portal", icon: ListChecks },
     ],
   },
   {

@@ -1,10 +1,20 @@
 import { useEffect, useState } from "react";
-import { formatDateTime, type Enquiry } from "@sai/shared";
+import { formatDateTime } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
 
-type EnquiryStatus = Enquiry["status"];
+type EnquiryStatus = "new" | "contacted" | "closed";
+interface Enquiry {
+  id: string;
+  customer_name: string;
+  phone: string;
+  email: string | null;
+  subject: string | null;
+  message: string | null;
+  status: EnquiryStatus;
+  created_at: string;
+}
 
 export function Enquiries() {
   const [enquiries, setEnquiries] = useState<Enquiry[]>([]);
@@ -24,7 +34,7 @@ export function Enquiries() {
 
   async function load() {
     const { data } = await supabase.from("enquiries").select("*").order("created_at", { ascending: false });
-    setEnquiries(data ?? []);
+    setEnquiries((data as Enquiry[]) ?? []);
   }
 
   async function setStatus(id: string, status: EnquiryStatus) {
@@ -42,10 +52,10 @@ export function Enquiries() {
         </h1>
         <ExportExcelButton
           rows={filtered.map((e) => ({
-            Name: e.name,
+            Name: e.customer_name,
             Phone: e.phone,
             Email: e.email,
-            "Product Interest": e.product_interest,
+            Subject: e.subject,
             Message: e.message,
             Status: e.status,
             Received: e.created_at,
@@ -75,7 +85,7 @@ export function Enquiries() {
             <tr>
               <th>Name</th>
               <th>Phone / Email</th>
-              <th>Product Interest</th>
+              <th>Subject</th>
               <th>Message</th>
               <th>Received</th>
               <th>Status</th>
@@ -84,12 +94,12 @@ export function Enquiries() {
           <tbody>
             {filtered.map((e) => (
               <tr key={e.id}>
-                <td className="font-medium">{e.name}</td>
+                <td className="font-medium">{e.customer_name}</td>
                 <td>
                   {e.phone}
                   {e.email ? ` · ${e.email}` : ""}
                 </td>
-                <td>{e.product_interest ?? "-"}</td>
+                <td>{e.subject ?? "-"}</td>
                 <td className="max-w-xs truncate" title={e.message ?? ""}>
                   {e.message ?? "-"}
                 </td>

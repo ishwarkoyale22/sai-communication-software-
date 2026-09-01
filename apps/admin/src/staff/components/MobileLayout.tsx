@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from "react-router-dom";
-import { Home, ShoppingCart, Clock, ListChecks, LogOut } from "lucide-react";
+import { Home, Clock, ListChecks, Bell } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 
 export function MobileLayout() {
@@ -10,7 +10,7 @@ export function MobileLayout() {
       <header className="flex h-topbar shrink-0 items-center justify-between border-b border-border bg-card px-4">
         <span className="text-sm font-semibold text-gray-800">Hi, {staff?.name?.split(" ")[0]}</span>
         <button onClick={() => signOut()} className="text-gray-400">
-          <LogOut size={18} />
+          Logout
         </button>
       </header>
       <main className="flex-1 overflow-y-auto p-4 pb-20">
@@ -18,15 +18,15 @@ export function MobileLayout() {
       </main>
       <nav className="fixed bottom-0 left-0 right-0 flex h-16 border-t border-border bg-card">
         {[
-          { to: "/", label: "Home", icon: Home },
-          { to: "/attendance", label: "Attendance", icon: Clock },
-          { to: "/tasks", label: "Tasks", icon: ListChecks },
-          { to: "/billing", label: "New Sale", icon: ShoppingCart },
-        ].map(({ to, label, icon: Icon }) => (
+          { to: "/portal", label: "Home", icon: Home, end: true },
+          { to: "/portal/attendance", label: "Attendance", icon: Clock },
+          { to: "/portal/tasks", label: "Tasks", icon: ListChecks },
+          { to: "/portal/notifications", label: "Alerts", icon: Bell },
+        ].map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}
-            end={to === "/"}
+            end={end}
             className={({ isActive }) =>
               `flex flex-1 flex-col items-center justify-center gap-0.5 text-xs ${
                 isActive ? "text-brand-primary" : "text-gray-400"
