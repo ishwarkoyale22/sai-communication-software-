@@ -1,9 +1,15 @@
 import { createSupabaseClient } from "@sai/shared";
 
-export const supabase = createSupabaseClient(
-  import.meta.env.VITE_SUPABASE_URL as string,
-  import.meta.env.VITE_SUPABASE_ANON_KEY as string
-);
+const SUPABASE_URL =
+  (import.meta.env.VITE_SUPABASE_URL as string) ||
+  "https://egzcesgamwghmddxnent.supabase.co";
+
+const SUPABASE_ANON_KEY =
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
+  "sb_publishable_TlkAKqE1YolICBKvRYs2FA_pIaHSTs2";
+
+export const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 
 export function getGeolocation(): Promise<{ lat: number | null; lng: number | null }> {
   return new Promise((resolve) => {
