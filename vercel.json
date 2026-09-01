@@ -1,6 +1,6 @@
 {
   "installCommand": "npm install",
-  "buildCommand": "bash vercel-build.sh",
+  "buildCommand": "npm run build --workspace=apps/admin && rm -rf unified-dist && mkdir -p unified-dist && cp -r apps/admin/dist/. unified-dist/",
   "outputDirectory": "unified-dist",
   "rewrites": [
     { "source": "/(.*)", "destination": "/index.html" }
