@@ -31,6 +31,24 @@
   }
 }
 
+/* Gentle idle hover/float for the login card — pauses in place on mouse
+   hover so it doesn't fight the hover: lift transition in Login.tsx. */
+@keyframes card-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+.animate-card-float {
+  animation: card-float 5s ease-in-out infinite;
+}
+.animate-card-float:hover {
+  animation-play-state: paused;
+}
+
 @layer components {
   .card {
     @apply rounded-card border border-border bg-card shadow-card;
@@ -91,5 +109,34 @@
   /* ---- Page/section headings use the display serif, matching the storefront ---- */
   .heading-display {
     @apply font-serif font-semibold;
+  }
+
+  /* ---- Glossy variants — reserved for high-ceremony surfaces (login,
+     auth) rather than the everyday data-entry .input/.btn-primary, which
+     stay flat for density. Subtle top-to-bottom sheen + a soft inset ring. */
+  .input-glossy {
+    @apply w-full rounded-xl border border-border bg-gradient-to-b from-white to-accent/60 px-3.5 py-2.5 text-sm text-gray-800 outline-none transition-all placeholder:text-gray-400;
+    box-shadow: inset 0 1px 2px rgba(27, 27, 27, 0.04);
+  }
+  .input-glossy:focus {
+    @apply border-brand-primary bg-white;
+    box-shadow: 0 0 0 3px rgba(31, 58, 138, 0.12);
+  }
+  .btn-glossy {
+    @apply relative flex w-full items-center justify-center gap-2 overflow-hidden rounded-xl bg-gradient-to-b from-brand-primary to-brand-primaryDark py-2.5 text-sm font-semibold text-white transition-all duration-150;
+    box-shadow: 0 10px 24px -8px rgba(31, 58, 138, 0.5);
+  }
+  .btn-glossy::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-xl bg-gradient-to-b from-white/25 to-transparent;
+  }
+  .btn-glossy:hover {
+    filter: brightness(1.08);
+  }
+  .btn-glossy:active {
+    transform: scale(0.98);
+  }
+  .btn-glossy:disabled {
+    @apply pointer-events-none opacity-60;
   }
 }

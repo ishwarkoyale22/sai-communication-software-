@@ -22,10 +22,16 @@ export default {
         page: "#FBF9F6",
         card: "#FFFFFF",
         accent: "#F6F1E7",
-        // Sidebar: deep graphite with a warm gold accent — the same premium
-        // identity as the customer website's medallion motif.
-        sidebar: "#1A1712",
-        sidebarHover: "#282319",
+        // Sidebar: deep wine/oxblood with a warm gold accent — "Option 5"
+        // of the sidebar design pass. Gold + a hint of brand blue read as
+        // jewel tones against it, a genuinely different color story from
+        // the earlier flat graphite instead of just a re-tinted version.
+        sidebar: "#2A1420",
+        sidebarHover: "#3A1D2C",
+        sidebarText: "#C9B2B8",
+        sidebarTextMuted: "#B8969E",
+        sidebarLabel: "#8C6470",
+        sidebarFooter: "#A17E88",
         gold: "#C9975A",
         goldDim: "#8A6B3F",
         border: "#E5E0D8",
