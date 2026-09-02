@@ -17,7 +17,13 @@ export function ProductCard({
       <div className="relative flex aspect-[4/3] items-center justify-center bg-accent">
         {product.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={product.image_url} alt={product.name} className="h-full w-full object-cover" />
+          <img
+            src={product.image_url}
+            alt={product.name}
+            loading="lazy"
+            decoding="async"
+            className="h-full w-full object-cover"
+          />
         ) : (
           <Package className="text-gold/40" size={40} />
         )}

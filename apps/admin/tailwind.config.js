@@ -5,40 +5,41 @@ export default {
     extend: {
       colors: {
         brand: {
-          // Anchored on indigo for a richer, more retail-modern feel than the
-          // old flat blue. `primary` is the interactive accent used across
-          // buttons, links, and active nav.
-          primary: "#4F46E5",
-          primaryDark: "#4338CA",
+          // "Warm Brand-Aligned" palette — the customer website's Heritage
+          // Boutique deep blue + gold, carried into the back office so admin,
+          // staff and the storefront read as one product family.
+          primary: "#1F3A8A",
+          primaryDark: "#16296B",
           success: "#059669",
           warning: "#D97706",
           danger: "#DC2626",
           // Per-stat accent tones (used on Dashboard cards + icon chips).
-          revenue: "#059669", // emerald — money in
-          profit: "#4F46E5", // indigo — margin
-          stock: "#0EA5E9", // sky — inventory
-          repair: "#F59E0B", // amber — service jobs
+          revenue: "#C9975A", // gold — money in
+          profit: "#1F3A8A", // deep blue — margin
+          stock: "#1F3A8A", // deep blue — inventory / orders
+          repair: "#C9975A", // gold — service jobs
         },
-        page: "#F6F7FB",
+        page: "#FBF9F6",
         card: "#FFFFFF",
-        // Sidebar: deep graphite (not generic slate-blue) with a warm gold
-        // accent — ties the Admin Portal to the same premium identity as the
-        // customer website instead of looking like an unrelated SaaS template.
+        accent: "#F6F1E7",
+        // Sidebar: deep graphite with a warm gold accent — the same premium
+        // identity as the customer website's medallion motif.
         sidebar: "#1A1712",
         sidebarHover: "#282319",
         gold: "#C9975A",
         goldDim: "#8A6B3F",
-        border: "#E5E7EB",
+        border: "#E5E0D8",
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
+        serif: ["Fraunces", "ui-serif", "Georgia", "serif"],
       },
       borderRadius: {
-        card: "14px",
+        card: "10px",
       },
       boxShadow: {
-        card: "0 1px 2px 0 rgb(16 24 40 / 0.04), 0 1px 3px 0 rgb(16 24 40 / 0.06)",
-        cardHover: "0 4px 12px -2px rgb(16 24 40 / 0.10)",
+        card: "0 1px 2px 0 rgb(27 27 27 / 0.04), 0 1px 3px 0 rgb(27 27 27 / 0.06)",
+        cardHover: "0 4px 12px -2px rgb(27 27 27 / 0.10)",
       },
       spacing: {
         sidebar: "220px",

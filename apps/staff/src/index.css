@@ -9,17 +9,38 @@
   body {
     @apply bg-page text-gray-900 antialiased;
   }
+  /* Faster, less "sticky" touch response on phones — removes the ~300ms
+     double-tap-zoom delay browsers add to plain taps and drops the gray
+     tap-flash rectangle for a snappier feel. This app is used on the shop
+     floor from a phone, so this matters more here than anywhere else. */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer components {
   .card {
-    @apply rounded-card border-[0.5px] border-border bg-card;
+    @apply rounded-card border border-border bg-card;
   }
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
   }
   .btn-primary {
-    @apply btn bg-brand-primary text-white hover:bg-blue-700;
+    @apply btn bg-brand-primary text-white hover:opacity-90;
   }
   .btn-secondary {
     @apply btn border border-gray-300 text-gray-700 bg-white hover:bg-gray-50;
@@ -40,7 +61,7 @@
     @apply pill bg-red-100 text-red-700;
   }
   .pill-info {
-    @apply pill bg-blue-100 text-blue-700;
+    @apply pill bg-brand-primary/10 text-brand-primary;
   }
   .pill-neutral {
     @apply pill bg-gray-100 text-gray-600;
@@ -49,13 +70,13 @@
     @apply w-full text-sm border-collapse;
   }
   .table-base thead th {
-    @apply sticky top-0 z-10 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 px-3 py-2 border-b border-border;
+    @apply sticky top-0 z-10 bg-accent text-left text-xs font-semibold uppercase tracking-wide text-gray-500 px-3 py-2 border-b border-border;
   }
   .table-base tbody td {
     @apply px-3 py-2 border-b border-border;
   }
   .table-base tbody tr:hover {
-    @apply bg-blue-50/40;
+    @apply bg-brand-primary/5;
   }
   .input {
     @apply w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-brand-primary;

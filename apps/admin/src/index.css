@@ -9,6 +9,26 @@
   body {
     @apply bg-page text-gray-900 antialiased;
   }
+  /* Faster, less "sticky" touch response on phones/tablets — removes the
+     ~300ms double-tap-zoom delay browsers add to plain taps by default and
+     drops the gray tap-flash rectangle for a snappier feel. */
+  button,
+  a,
+  [role="button"] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @layer components {
@@ -40,24 +60,36 @@
     @apply pill bg-red-100 text-red-700;
   }
   .pill-info {
-    @apply pill bg-blue-100 text-blue-700;
+    @apply pill bg-brand-primary/10 text-brand-primary;
   }
   .pill-neutral {
     @apply pill bg-gray-100 text-gray-600;
   }
   .table-base {
     @apply w-full text-sm border-collapse;
+    min-width: 600px;
+  }
+  /* Any card wrapping a data table scrolls horizontally within itself on a
+     narrow viewport, instead of the table forcing the whole page to scroll
+     sideways — covers every table-base usage without touching each page. */
+  .card:has(.table-base) {
+    overflow-x: auto;
   }
   .table-base thead th {
-    @apply sticky top-0 z-10 bg-gray-50 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 px-3 py-2 border-b border-border;
+    @apply sticky top-0 z-10 bg-accent text-left text-xs font-semibold uppercase tracking-wide text-gray-500 px-3 py-2 border-b border-border;
   }
   .table-base tbody td {
     @apply px-3 py-2 border-b border-border;
   }
   .table-base tbody tr:hover {
-    @apply bg-blue-50/40;
+    @apply bg-brand-primary/5;
   }
   .input {
     @apply w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-brand-primary;
+  }
+
+  /* ---- Page/section headings use the display serif, matching the storefront ---- */
+  .heading-display {
+    @apply font-serif font-semibold;
   }
 }

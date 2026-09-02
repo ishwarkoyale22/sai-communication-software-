@@ -5,25 +5,31 @@ export default {
     extend: {
       colors: {
         brand: {
-          primary: "#2563EB",
-          success: "#16A34A",
+          // "Warm Brand-Aligned" palette — matches the admin portal and the
+          // customer website, so all three surfaces read as one product.
+          primary: "#1F3A8A",
+          success: "#059669",
           warning: "#D97706",
           danger: "#DC2626",
         },
-        page: "#F8F9FA",
+        page: "#FBF9F6",
         card: "#FFFFFF",
-        sidebar: "#F1F3F5",
-        border: "#E5E7EB",
+        sidebar: "#1A1712",
+        gold: "#C9975A",
+        goldDim: "#8A6B3F",
+        accent: "#F6F1E7",
+        border: "#E5E0D8",
       },
       fontFamily: {
-        sans: ["Inter", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["Manrope", "ui-sans-serif", "system-ui", "sans-serif"],
+        serif: ["Fraunces", "ui-serif", "Georgia", "serif"],
       },
       borderRadius: {
-        card: "12px",
+        card: "10px",
       },
       spacing: {
         sidebar: "200px",
-        topbar: "52px",
+        topbar: "56px",
       },
     },
   },

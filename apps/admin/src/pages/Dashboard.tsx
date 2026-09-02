@@ -78,25 +78,25 @@ export function Dashboard() {
   }
 
   const cards = [
-    { label: "Today's Sales", value: formatCurrency(metrics.todayRevenue), icon: IndianRupee, iconBg: "bg-emerald-50 text-emerald-600" },
-    { label: "Pending Repair Enquiries", value: metrics.pendingRepairEnquiries.toString(), icon: Wrench, iconBg: "bg-amber-50 text-amber-600", to: "/repair-enquiries" },
-    { label: "Pending Website Orders", value: metrics.pendingWebsiteOrders.toString(), icon: ShoppingBag, iconBg: "bg-sky-50 text-sky-600", to: "/web-orders" },
-    { label: "Low Stock Products", value: metrics.lowStockCount.toString(), icon: Package, iconBg: "bg-red-50 text-red-600", to: "/inventory" },
+    { label: "Today's Sales", value: formatCurrency(metrics.todayRevenue), icon: IndianRupee, iconColor: "text-gold" },
+    { label: "Pending Repair Enquiries", value: metrics.pendingRepairEnquiries.toString(), icon: Wrench, iconColor: "text-gold", to: "/repair-enquiries" },
+    { label: "Pending Website Orders", value: metrics.pendingWebsiteOrders.toString(), icon: ShoppingBag, iconColor: "text-brand-primary", to: "/web-orders" },
+    { label: "Low Stock Products", value: metrics.lowStockCount.toString(), icon: Package, iconColor: "text-brand-danger", to: "/inventory" },
   ];
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {cards.map((c) => {
           const Card = (
             <div className="card relative overflow-hidden p-4 pl-5 transition-shadow hover:shadow-cardHover">
               <div className="flex items-start justify-between">
                 <div>
                   <div className="text-xs font-medium text-gray-500">{c.label}</div>
-                  <div className="mt-1 text-2xl font-semibold text-gray-800">{c.value}</div>
+                  <div className="mt-1 font-serif text-2xl font-semibold text-gray-800">{c.value}</div>
                 </div>
-                <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${c.iconBg}`}>
-                  <c.icon size={18} />
+                <div className={`flex h-9 w-9 items-center justify-center rounded-lg border border-border ${c.iconColor}`}>
+                  <c.icon size={17} strokeWidth={1.75} />
                 </div>
               </div>
             </div>
@@ -105,40 +105,42 @@ export function Dashboard() {
         })}
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
-        <div className="card col-span-2 p-4">
-          <div className="mb-3 text-sm font-semibold text-gray-700">Recent Website Orders</div>
-          <table className="table-base">
-            <thead>
-              <tr>
-                <th>Order #</th>
-                <th>Customer</th>
-                <th className="text-right">Amount</th>
-                <th>Status</th>
-                <th>When</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentOrders.map((o) => (
-                <tr key={o.id}>
-                  <td className="font-medium">{o.order_number}</td>
-                  <td>{o.customer_name}</td>
-                  <td className="text-right">{formatCurrency(o.total_amount)}</td>
-                  <td><StatusPill status={o.order_status} label={o.order_status} /></td>
-                  <td className="text-gray-500">{formatDateTime(o.created_at)}</td>
-                </tr>
-              ))}
-              {recentOrders.length === 0 && (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="card p-4 lg:col-span-2">
+          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Recent Website Orders</div>
+          <div className="overflow-x-auto">
+            <table className="table-base min-w-[560px]">
+              <thead>
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-gray-400">No orders yet</td>
+                  <th>Order #</th>
+                  <th>Customer</th>
+                  <th className="text-right">Amount</th>
+                  <th>Status</th>
+                  <th>When</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {recentOrders.map((o) => (
+                  <tr key={o.id}>
+                    <td className="font-medium">{o.order_number}</td>
+                    <td>{o.customer_name}</td>
+                    <td className="text-right">{formatCurrency(o.total_amount)}</td>
+                    <td><StatusPill status={o.order_status} label={o.order_status} /></td>
+                    <td className="text-gray-500">{formatDateTime(o.created_at)}</td>
+                  </tr>
+                ))}
+                {recentOrders.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="py-6 text-center text-gray-400">No orders yet</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="card p-4">
-          <div className="mb-3 text-sm font-semibold text-gray-700">Low Stock Alerts (&lt; 5)</div>
+          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Low Stock Alerts (&lt; 5)</div>
           <ul className="space-y-1.5">
             {lowStock.map((p) => (
               <li key={p.id} className="flex justify-between text-sm">

@@ -1,4 +1,5 @@
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   LayoutDashboard,
   Package,
@@ -18,6 +19,8 @@ import {
   Star,
   Tag,
   Wand2,
+  Menu,
+  X,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -69,24 +72,57 @@ const NAV_GROUPS: {
 
 export function Layout() {
   const { signOut } = useAuth();
+  const location = useLocation();
+  // Sidebar is a static column on large screens (lg+) and an off-canvas
+  // drawer below that — closed by default so a phone/tablet load doesn't
+  // start with a full-height overlay covering the page.
+  const [navOpen, setNavOpen] = useState(false);
+
+  // Close the drawer automatically on navigation, so tapping a link doesn't
+  // leave the overlay sitting open behind the new page.
+  useEffect(() => {
+    setNavOpen(false);
+  }, [location.pathname]);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-page">
-      <aside className="relative flex w-sidebar shrink-0 flex-col overflow-hidden bg-sidebar text-gray-400">
+      {/* Backdrop — mobile/tablet only, closes the drawer on tap */}
+      {navOpen && (
+        <div
+          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+          onClick={() => setNavOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[82vw] shrink-0 flex-col overflow-hidden bg-sidebar text-gray-400 transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-sidebar lg:max-w-none lg:translate-x-0 ${
+          navOpen ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
         {/* faint gold glow, top-left — echoes the boutique brand instead of a flat panel */}
         <div
           className="pointer-events-none absolute inset-x-0 top-0 h-40 opacity-60"
           style={{ background: "radial-gradient(320px circle at 20% 0%, rgba(201,151,90,0.16), transparent 70%)" }}
         />
 
-        <div className="relative flex h-topbar items-center gap-2.5 px-4">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-gold/40 bg-gradient-to-br from-gold to-goldDim font-serif text-sm font-bold text-sidebar shadow-sm">
-            S
+        <div className="relative flex h-topbar items-center justify-between gap-2.5 px-4">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gold/40 bg-gradient-to-br from-gold to-goldDim font-serif text-sm font-bold text-sidebar shadow-sm">
+              S
+            </div>
+            <div className="flex min-w-0 flex-col leading-tight">
+              <span className="truncate font-serif text-sm font-semibold text-white">Sai Communication</span>
+              <span className="text-[10px] uppercase tracking-wider text-gold/70">Admin Portal</span>
+            </div>
           </div>
-          <div className="flex flex-col leading-tight">
-            <span className="text-sm font-semibold text-white">Sai Communication</span>
-            <span className="text-[10px] uppercase tracking-wider text-gold/70">Admin Portal</span>
-          </div>
+          <button
+            onClick={() => setNavOpen(false)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-sidebarHover hover:text-white lg:hidden"
+            aria-label="Close menu"
+          >
+            <X size={18} />
+          </button>
         </div>
 
         <nav className="relative flex-1 overflow-y-auto px-2 py-2">
@@ -101,7 +137,7 @@ export function Layout() {
                   to={to}
                   end={to === "/"}
                   className={({ isActive }) =>
-                    `flex items-center gap-2 rounded-md border-l-2 px-2 py-1.5 text-sm transition-colors ${
+                    `flex items-center gap-2 rounded-md border-l-2 px-2 py-2 text-sm transition-colors lg:py-1.5 ${
                       isActive
                         ? "border-gold bg-gold/10 font-medium text-gold"
                         : "border-transparent text-gray-400 hover:bg-sidebarHover hover:text-white"
@@ -126,13 +162,22 @@ export function Layout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-topbar shrink-0 items-center justify-between border-b border-border bg-card px-5">
-          <div className="text-sm font-medium text-gray-700">Admin Portal</div>
-          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-brand-primary/10 text-xs font-semibold text-brand-primary">
+        <header className="flex h-topbar shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4 sm:px-5">
+          <div className="flex min-w-0 items-center gap-2">
+            <button
+              onClick={() => setNavOpen(true)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border text-gray-600 hover:border-gold hover:text-gold lg:hidden"
+              aria-label="Open menu"
+            >
+              <Menu size={18} />
+            </button>
+            <div className="truncate font-serif text-sm font-medium text-gray-700">Admin Portal</div>
+          </div>
+          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-primary/10 text-xs font-semibold text-brand-primary">
             SC
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-5">
+        <main className="flex-1 overflow-y-auto p-3 sm:p-5">
           <Outlet />
         </main>
       </div>
