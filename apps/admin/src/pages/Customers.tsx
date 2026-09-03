@@ -40,6 +40,17 @@ export function Customers() {
 
   useEffect(() => {
     load();
+    // Without this, a customer created by a fresh walk-in sale (or a new
+    // sale against an existing one) only ever showed up here after a full
+    // page reload — this page never re-fetched on its own.
+    const channel = supabase
+      .channel("customers-page")
+      .on("postgres_changes", { event: "*", schema: "public", table: "customers" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, load)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   useEffect(() => {

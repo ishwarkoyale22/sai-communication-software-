@@ -24,6 +24,13 @@ export function ThirdPartyPurchases() {
 
   useEffect(() => {
     load();
+    const channel = supabase
+      .channel("third-party-purchases-page")
+      .on("postgres_changes", { event: "*", schema: "public", table: "third_party_purchases" }, load)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   async function load() {

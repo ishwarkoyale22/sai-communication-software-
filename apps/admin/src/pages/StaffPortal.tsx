@@ -49,6 +49,20 @@ export function StaffPortal() {
 
   useEffect(() => {
     load();
+    // This page never re-fetched on its own — a staff member clocking in,
+    // filing a leave request, or completing a task only showed up here
+    // after leaving the page and coming back. Live-refresh on every table
+    // this view reads from.
+    const channel = supabase
+      .channel("staff-portal-oversight-page")
+      .on("postgres_changes", { event: "*", schema: "public", table: "attendance" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "leave_requests" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "staff_tasks" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "staff" }, load)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   async function load() {
