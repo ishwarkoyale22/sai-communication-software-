@@ -115,13 +115,41 @@ export function Sales() {
     setSaving(true);
     setError(null);
     try {
+      // A sale typed in fresh (not picked from the existing-customer
+      // dropdown) never used to create a `customers` row — it only stored
+      // customer_name/customer_phone as plain text on the sale itself, so
+      // that person could never show up on the Customers page or build up
+      // purchase/repair history there. Resolve (or create) a real customer
+      // record here whenever we have a phone number to key it on, same as
+      // "vijay" and every other walk-in should have been getting all along.
+      let finalCustomerId = customerId || null;
+      const trimmedPhone = customerPhone.trim();
+      if (!finalCustomerId && trimmedPhone) {
+        const { data: existingCustomer } = await supabase
+          .from("customers")
+          .select("id")
+          .eq("phone", trimmedPhone)
+          .maybeSingle();
+        if (existingCustomer) {
+          finalCustomerId = existingCustomer.id;
+        } else {
+          const { data: newCustomer, error: custErr } = await supabase
+            .from("customers")
+            .insert({ name: customerName.trim(), phone: trimmedPhone })
+            .select("id")
+            .single();
+          if (custErr) throw custErr;
+          finalCustomerId = newCustomer.id;
+        }
+      }
+
       const { data: sale, error: saleErr } = await supabase
         .from("sales")
         .insert({
           invoice_number: nextInvoiceNumber(),
-          customer_id: customerId || null,
+          customer_id: finalCustomerId,
           customer_name: customerName.trim(),
-          customer_phone: customerPhone.trim() || null,
+          customer_phone: trimmedPhone || null,
           sale_type: "in_store",
           total_amount: cartTotal,
           discount: 0,

@@ -3,8 +3,11 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { StaffAuthProvider, useStaffAuth } from "./staff/context/StaffAuthContext";
 
-// Set BYPASS_AUTH = true for local development and direct portal testing.
-const BYPASS_AUTH = true;
+// Auth bypass must stay off outside of local, ad-hoc debugging — leaving it
+// on is what let the whole Admin Portal render without ever signing in,
+// while every write action still (correctly) checked for a real session
+// and silently failed with "Your admin session has expired".
+const BYPASS_AUTH = false;
 import { Layout } from "./components/Layout";
 import { Login } from "./pages/Login";
 import { ForgotPassword } from "./pages/ForgotPassword";
