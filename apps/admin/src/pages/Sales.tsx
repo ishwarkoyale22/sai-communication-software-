@@ -1,14 +1,19 @@
 import { useEffect, useState } from "react";
-import { formatCurrency, formatDateTime } from "@sai/shared";
-import { supabase } from "../lib/supabase";
+import { formatCurrency, formatDateTime, generateSimpleInvoicePdf, openRetailTaxInvoice } from "@sai/shared";
+import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Plus, Trash2, X } from "lucide-react";
+import { Plus, Trash2, X, Printer, Receipt } from "lucide-react";
 
 interface Customer {
   id: string;
   name: string;
   phone: string;
+  birthday: string | null;
+}
+interface StaffLite {
+  id: string;
+  name: string;
 }
 interface InventoryItem {
   id: string;
@@ -49,22 +54,27 @@ export function Sales() {
   const [sales, setSales] = useState<Sale[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [staffList, setStaffList] = useState<StaffLite[]>([]);
+  const [staffId, setStaffId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [customerId, setCustomerId] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerDob, setCustomerDob] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [pickId, setPickId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null);
 
   useEffect(() => {
     load();
-    supabase.from("customers").select("id, name, phone").order("name").then(({ data }) => setCustomers((data as Customer[]) ?? []));
+    supabase.from("customers").select("id, name, phone, birthday").order("name").then(({ data }) => setCustomers((data as Customer[]) ?? []));
     supabase.from("inventory").select("id, name, model, price, stock").eq("is_active", true).order("name").then(({ data }) => setInventory((data as InventoryItem[]) ?? []));
+    supabase.from("staff").select("id, name").eq("is_active", true).order("name").then(({ data }) => setStaffList((data as StaffLite[]) ?? []));
     const channel = supabase
       .channel("sales-page")
       .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, load)
@@ -132,10 +142,15 @@ export function Sales() {
           .maybeSingle();
         if (existingCustomer) {
           finalCustomerId = existingCustomer.id;
+          // Backfill DOB if the customer already existed but didn't have one
+          // on file yet, and the cashier captured it on this sale.
+          if (customerDob) {
+            await supabase.from("customers").update({ birthday: customerDob }).eq("id", finalCustomerId).is("birthday", null);
+          }
         } else {
           const { data: newCustomer, error: custErr } = await supabase
             .from("customers")
-            .insert({ name: customerName.trim(), phone: trimmedPhone })
+            .insert({ name: customerName.trim(), phone: trimmedPhone, birthday: customerDob || null })
             .select("id")
             .single();
           if (custErr) throw custErr;
@@ -156,6 +171,7 @@ export function Sales() {
           final_amount: cartTotal,
           payment_method: paymentMethod,
           payment_status: "paid",
+          staff_id: staffId || null,
         })
         .select()
         .single();
@@ -186,6 +202,8 @@ export function Sales() {
       setCustomerId("");
       setCustomerName("");
       setCustomerPhone("");
+      setCustomerDob("");
+      setStaffId("");
       setShowForm(false);
       await load();
       const { data: freshInv } = await supabase.from("inventory").select("id, name, model, price, stock").eq("is_active", true).order("name");
@@ -194,6 +212,71 @@ export function Sales() {
       setError(err?.message || "Failed to create sale.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function downloadInvoice(sale: Sale, mode: "download" | "print") {
+    setInvoiceLoadingId(sale.id);
+    try {
+      const { data: items } = await supabase
+        .from("sales_items")
+        .select("item_name, quantity, unit_price, total_price")
+        .eq("sale_id", sale.id);
+      generateSimpleInvoicePdf({
+        invoiceNumber: sale.invoice_number,
+        customerName: sale.customer_name,
+        customerPhone: sale.customer_phone,
+        paymentMethod: sale.payment_method,
+        paymentStatus: sale.payment_status,
+        createdAt: sale.created_at,
+        items: (items ?? []).map((i: any) => ({
+          name: i.item_name,
+          quantity: i.quantity,
+          unitPrice: i.unit_price,
+          totalPrice: i.total_price,
+        })),
+        totalAmount: sale.total_amount,
+        discount: sale.discount,
+        finalAmount: sale.final_amount,
+        shop: SHOP,
+        mode,
+      });
+    } catch (err: any) {
+      alert(err?.message || "Failed to generate invoice.");
+    } finally {
+      setInvoiceLoadingId(null);
+    }
+  }
+
+  // GST-style "Tax Invoice" matching the shop's real paper invoice format
+  // (CGST/SGST breakdown, HSN/SAC, amount in words) — a separate, richer
+  // invoice style alongside the plain one above, not a replacement for it.
+  async function printGstInvoice(sale: Sale) {
+    setInvoiceLoadingId(sale.id);
+    try {
+      const { data: items } = await supabase
+        .from("sales_items")
+        .select("item_name, quantity, total_price")
+        .eq("sale_id", sale.id);
+      openRetailTaxInvoice({
+        invoiceNumber: sale.invoice_number,
+        createdAt: sale.created_at,
+        customerName: sale.customer_name,
+        customerPhone: sale.customer_phone,
+        paymentMethod: sale.payment_method,
+        receivedAmount: sale.payment_status === "paid" ? sale.final_amount : undefined,
+        items: (items ?? []).map((i: any) => ({
+          name: i.item_name,
+          quantity: i.quantity,
+          totalPrice: i.total_price,
+        })),
+        totalAmount: sale.final_amount,
+        shop: SHOP,
+      });
+    } catch (err: any) {
+      alert(err?.message || "Failed to generate GST invoice.");
+    } finally {
+      setInvoiceLoadingId(null);
     }
   }
 
@@ -241,6 +324,7 @@ export function Sales() {
               <th className="text-right">Total</th>
               <th>Payment</th>
               <th>Date</th>
+              <th className="text-right">Invoice</th>
             </tr>
           </thead>
           <tbody>
@@ -254,11 +338,39 @@ export function Sales() {
                 <td className="text-right">{formatCurrency(s.final_amount)}</td>
                 <td className="text-gray-500 capitalize">{s.payment_method} · {s.payment_status}</td>
                 <td className="text-gray-500">{formatDateTime(s.created_at)}</td>
+                <td className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button
+                      className="btn-ghost !px-2 !py-1 text-xs"
+                      disabled={invoiceLoadingId === s.id}
+                      onClick={() => downloadInvoice(s, "download")}
+                      title="Download invoice PDF"
+                    >
+                      Download
+                    </button>
+                    <button
+                      className="btn-secondary !px-2 !py-1 text-xs"
+                      disabled={invoiceLoadingId === s.id}
+                      onClick={() => downloadInvoice(s, "print")}
+                      title="Print invoice"
+                    >
+                      <Printer size={13} />
+                    </button>
+                    <button
+                      className="btn-secondary !px-2 !py-1 text-xs"
+                      disabled={invoiceLoadingId === s.id}
+                      onClick={() => printGstInvoice(s)}
+                      title="Print GST Tax Invoice (Retail Sale format, CGST/SGST breakdown)"
+                    >
+                      <Receipt size={13} /> GST Invoice
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-gray-400">
+                <td colSpan={7} className="py-8 text-center text-gray-400">
                   No sales found
                 </td>
               </tr>
@@ -285,6 +397,7 @@ export function Sales() {
                 setCustomerId(e.target.value);
                 setCustomerName(c?.name ?? customerName);
                 setCustomerPhone(c?.phone ?? customerPhone);
+                setCustomerDob(c?.birthday ?? "");
               }}
             >
               <option value="">Walk-in / choose existing customer</option>
@@ -296,6 +409,25 @@ export function Sales() {
               <input className="input" placeholder="Customer name *" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
               <input className="input" placeholder="Phone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
             </div>
+            <input
+              type="date"
+              className="input"
+              placeholder="Date of birth"
+              value={customerDob}
+              onChange={(e) => setCustomerDob(e.target.value)}
+              title="Date of birth (optional) — used for birthday offers/tracking"
+            />
+            <select
+              className="input"
+              value={staffId}
+              onChange={(e) => setStaffId(e.target.value)}
+              title="Which staff member made this sale — powers the Dashboard's Salesman Leaderboard"
+            >
+              <option value="">Sold by (optional)</option>
+              {staffList.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
 
             <div className="flex gap-2">
               <select className="input flex-1" value={pickId} onChange={(e) => setPickId(e.target.value)}>

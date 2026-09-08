@@ -1,15 +1,49 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { IndianRupee, Package, Wrench, ShoppingBag } from "lucide-react";
-import { formatCurrency, formatDateTime } from "@sai/shared";
+import { IndianRupee, Package, Wrench, ShoppingBag, Receipt, TrendingUp, Boxes, AlertTriangle, Trophy, Target, Save } from "lucide-react";
+import { formatCurrency, formatDateTime, computePaymentSplit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { StatusPill } from "../components/StatusPill";
 
-interface Metrics {
-  todayRevenue: number;
-  lowStockCount: number;
-  pendingRepairEnquiries: number;
-  pendingWebsiteOrders: number;
+type Period = "day" | "week" | "month" | "year";
+
+interface SaleRow {
+  id: string;
+  final_amount: number;
+  payment_method: string | null;
+  staff_id: string | null;
+  created_at: string;
+}
+interface SaleItemRow {
+  sale_id: string;
+  inventory_id: string | null;
+  item_name: string;
+  quantity: number;
+  total_price: number;
+}
+interface InventoryRow {
+  id: string;
+  name: string;
+  category: string | null;
+  price: number;
+  cost_price: number | null;
+  stock: number;
+  created_at: string;
+}
+interface RepairRow {
+  id: string;
+  status: string;
+  technician_id: string | null;
+  received_at: string;
+  completed_at: string | null;
+}
+interface StaffLite {
+  id: string;
+  name: string;
+}
+interface SalesTarget {
+  period: "daily" | "weekly" | "monthly";
+  target_amount: number;
 }
 
 interface RecentOrder {
@@ -21,25 +55,61 @@ interface RecentOrder {
   created_at: string;
 }
 
-interface LowStockItem {
-  id: string;
-  name: string;
-  stock: number;
+const REPAIR_STATUS_LABEL: Record<string, string> = {
+  received: "Received",
+  in_progress: "In Progress",
+  waiting_parts: "Waiting for Parts",
+  ready: "Ready for Delivery",
+  completed: "Completed",
+};
+const OPEN_REPAIR_STATUSES = ["received", "in_progress", "waiting_parts", "ready"];
+
+function periodStart(period: "day" | "week" | "month" | "year"): Date {
+  const d = new Date();
+  if (period === "day") {
+    d.setHours(0, 0, 0, 0);
+  } else if (period === "week") {
+    const day = d.getDay(); // 0 = Sunday
+    d.setDate(d.getDate() - day);
+    d.setHours(0, 0, 0, 0);
+  } else if (period === "month") {
+    d.setDate(1);
+    d.setHours(0, 0, 0, 0);
+  } else {
+    d.setMonth(0, 1);
+    d.setHours(0, 0, 0, 0);
+  }
+  return d;
 }
 
 export function Dashboard() {
-  const [metrics, setMetrics] = useState<Metrics>({ todayRevenue: 0, lowStockCount: 0, pendingRepairEnquiries: 0, pendingWebsiteOrders: 0 });
+  const [period, setPeriod] = useState<Period>("day");
+  const [sales, setSales] = useState<SaleRow[]>([]);
+  const [saleItems, setSaleItems] = useState<SaleItemRow[]>([]);
+  const [inventory, setInventory] = useState<InventoryRow[]>([]);
+  const [emiTotal, setEmiTotal] = useState(0);
+  const [pendingRepairEnquiries, setPendingRepairEnquiries] = useState(0);
+  const [pendingWebsiteOrders, setPendingWebsiteOrders] = useState(0);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
-  const [lowStock, setLowStock] = useState<LowStockItem[]>([]);
+  const [repairs, setRepairs] = useState<RepairRow[]>([]);
+  const [staff, setStaff] = useState<StaffLite[]>([]);
+  const [targets, setTargets] = useState<Record<string, number>>({ daily: 0, weekly: 0, monthly: 0 });
+  const [targetDrafts, setTargetDrafts] = useState<Record<string, string>>({});
+  const [savingTarget, setSavingTarget] = useState<string | null>(null);
+  const [deadStockDays, setDeadStockDays] = useState(60);
 
   useEffect(() => {
     load();
     const channel = supabase
       .channel("dashboard-live")
       .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_items" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "website_orders" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "repair_enquiries" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "repairs" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "inventory" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "emi_finance" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "sales_targets" }, load)
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -47,45 +117,253 @@ export function Dashboard() {
   }, []);
 
   async function load() {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    // Pull a superset (last 366 days) once and slice client-side per period,
+    // rather than re-querying on every toggle — the row count for a single
+    // shop's sales history is small enough that this stays fast.
+    const yearAgo = new Date();
+    yearAgo.setFullYear(yearAgo.getFullYear() - 1);
 
     const [
-      { data: todaySales },
-      { data: inventory },
+      { data: allSales },
+      { data: items },
+      { data: inv },
+      { data: emiRows },
       { count: pendingRepairEnq },
       { count: pendingOrders },
       { data: orders },
+      { data: repairRows },
+      { data: staffRows },
+      { data: targetRows },
     ] = await Promise.all([
-      supabase.from("sales").select("final_amount").gte("created_at", todayStart.toISOString()),
-      supabase.from("inventory").select("id, name, stock").eq("is_active", true).order("stock", { ascending: true }),
+      supabase.from("sales").select("id, final_amount, payment_method, staff_id, created_at").gte("created_at", yearAgo.toISOString()),
+      supabase.from("sales_items").select("sale_id, inventory_id, item_name, quantity, total_price"),
+      supabase.from("inventory").select("id, name, category, price, cost_price, stock, created_at").eq("is_active", true),
+      supabase.from("emi_finance").select("loan_amount").eq("status", "active"),
       supabase.from("repair_enquiries").select("id", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("website_orders").select("id", { count: "exact", head: true }).eq("order_status", "pending"),
       supabase.from("website_orders").select("id, order_number, customer_name, total_amount, order_status, created_at").order("created_at", { ascending: false }).limit(5),
+      supabase.from("repairs").select("id, status, technician_id, received_at, completed_at"),
+      supabase.from("staff").select("id, name").eq("is_active", true),
+      supabase.from("sales_targets").select("period, target_amount"),
     ]);
 
-    const revenue = (todaySales ?? []).reduce((s, r: any) => s + Number(r.final_amount ?? 0), 0);
-    const low = ((inventory as LowStockItem[]) ?? []).filter((i) => i.stock < 5);
-
-    setMetrics({
-      todayRevenue: revenue,
-      lowStockCount: low.length,
-      pendingRepairEnquiries: pendingRepairEnq ?? 0,
-      pendingWebsiteOrders: pendingOrders ?? 0,
-    });
-    setLowStock(low.slice(0, 8));
+    setSales((allSales as SaleRow[]) ?? []);
+    setSaleItems((items as SaleItemRow[]) ?? []);
+    setInventory((inv as InventoryRow[]) ?? []);
+    setEmiTotal(((emiRows ?? []) as { loan_amount: number }[]).reduce((s, r) => s + Number(r.loan_amount ?? 0), 0));
+    setPendingRepairEnquiries(pendingRepairEnq ?? 0);
+    setPendingWebsiteOrders(pendingOrders ?? 0);
     setRecentOrders((orders as RecentOrder[]) ?? []);
+    setRepairs((repairRows as RepairRow[]) ?? []);
+    setStaff((staffRows as StaffLite[]) ?? []);
+    const targetMap: Record<string, number> = { daily: 0, weekly: 0, monthly: 0 };
+    for (const t of (targetRows as SalesTarget[]) ?? []) targetMap[t.period] = Number(t.target_amount) || 0;
+    setTargets(targetMap);
+  }
+
+  const staffById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const s of staff) map[s.id] = s.name;
+    return map;
+  }, [staff]);
+
+  const inventoryById = useMemo(() => {
+    const map: Record<string, InventoryRow> = {};
+    for (const i of inventory) map[i.id] = i;
+    return map;
+  }, [inventory]);
+
+  const periodSales = useMemo(() => {
+    const start = periodStart(period).toISOString();
+    return sales.filter((s) => s.created_at >= start);
+  }, [sales, period]);
+
+  const periodSaleIds = useMemo(() => new Set(periodSales.map((s) => s.id)), [periodSales]);
+  const periodItems = useMemo(() => saleItems.filter((i) => periodSaleIds.has(i.sale_id)), [saleItems, periodSaleIds]);
+
+  const totalRevenue = useMemo(() => periodSales.reduce((s, r) => s + Number(r.final_amount ?? 0), 0), [periodSales]);
+  const invoiceCount = periodSales.length;
+
+  const grossProfit = useMemo(() => {
+    let profit = 0;
+    for (const item of periodItems) {
+      const inv = item.inventory_id ? inventoryById[item.inventory_id] : null;
+      if (!inv || inv.cost_price == null) continue; // no cost recorded — excluded, not assumed zero
+      profit += item.total_price - inv.cost_price * item.quantity;
+    }
+    return profit;
+  }, [periodItems, inventoryById]);
+
+  const paymentSplit = useMemo(
+    () => computePaymentSplit(periodSales.map((s) => ({ amount: s.final_amount, paymentMethod: s.payment_method })), period === "year" ? emiTotal : 0),
+    [periodSales, emiTotal, period]
+  );
+
+  const topProducts = useMemo(() => {
+    const byName: Record<string, { name: string; qty: number; revenue: number }> = {};
+    for (const i of periodItems) {
+      byName[i.item_name] = byName[i.item_name] ?? { name: i.item_name, qty: 0, revenue: 0 };
+      byName[i.item_name].qty += i.quantity;
+      byName[i.item_name].revenue += i.total_price;
+    }
+    return Object.values(byName).sort((a, b) => b.revenue - a.revenue).slice(0, 5);
+  }, [periodItems]);
+
+  const liveStockValue = useMemo(() => inventory.reduce((s, i) => s + i.price * i.stock, 0), [inventory]);
+  const lowStock = useMemo(() => inventory.filter((i) => i.stock < 5).sort((a, b) => a.stock - b.stock), [inventory]);
+
+  // "High-demand" = a low-stock item that has actually sold in the current
+  // period — distinguishes a popular model running out from a slow mover
+  // that just happens to be low.
+  const soldQtyByInventoryId = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const i of periodItems) {
+      if (!i.inventory_id) continue;
+      map[i.inventory_id] = (map[i.inventory_id] ?? 0) + i.quantity;
+    }
+    return map;
+  }, [periodItems]);
+  const highDemandLowStock = useMemo(
+    () => lowStock.filter((i) => (soldQtyByInventoryId[i.id] ?? 0) > 0),
+    [lowStock, soldQtyByInventoryId]
+  );
+
+  // Dead Stock Monitoring — items with no sale within the last N days.
+  // "Last sold" is derived from sales_items joined to sales.created_at
+  // (both already loaded, last 366 days) rather than a stored column, since
+  // no such column exists on inventory. An item that has never sold at all
+  // only counts as dead stock once it's also been in the catalog longer
+  // than the threshold — a brand-new listing isn't "dead" on day one.
+  const lastSoldAtByInventoryId = useMemo(() => {
+    const salesById: Record<string, string> = {};
+    for (const s of sales) salesById[s.id] = s.created_at;
+    const map: Record<string, string> = {};
+    for (const item of saleItems) {
+      if (!item.inventory_id) continue;
+      const soldAt = salesById[item.sale_id];
+      if (!soldAt) continue;
+      if (!map[item.inventory_id] || soldAt > map[item.inventory_id]) map[item.inventory_id] = soldAt;
+    }
+    return map;
+  }, [sales, saleItems]);
+
+  const deadStock = useMemo(() => {
+    const cutoff = Date.now() - deadStockDays * 86400000;
+    return inventory
+      .filter((i) => i.stock > 0)
+      .map((i) => {
+        const lastSoldAt = lastSoldAtByInventoryId[i.id];
+        const referenceDate = lastSoldAt ?? i.created_at;
+        return { ...i, lastSoldAt: lastSoldAt ?? null, daysSince: Math.floor((Date.now() - new Date(referenceDate).getTime()) / 86400000) };
+      })
+      .filter((i) => new Date(i.lastSoldAt ?? i.created_at).getTime() < cutoff)
+      .sort((a, b) => b.daysSince - a.daysSince);
+  }, [inventory, lastSoldAtByInventoryId, deadStockDays]);
+
+  // Service & Repair Metrics
+  const repairFunnel = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const s of OPEN_REPAIR_STATUSES) counts[s] = 0;
+    for (const r of repairs) {
+      if (OPEN_REPAIR_STATUSES.includes(r.status)) counts[r.status] = (counts[r.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [repairs]);
+
+  const technicianEfficiency = useMemo(() => {
+    const map: Record<string, { name: string; completed: number; pending: number }> = {};
+    for (const r of repairs) {
+      if (!r.technician_id) continue;
+      const name = staffById[r.technician_id] ?? "Unknown";
+      map[r.technician_id] = map[r.technician_id] ?? { name, completed: 0, pending: 0 };
+      if (r.status === "completed") map[r.technician_id].completed += 1;
+      else map[r.technician_id].pending += 1;
+    }
+    return Object.values(map).sort((a, b) => b.completed - a.completed);
+  }, [repairs, staffById]);
+
+  // Staff Accountability — today's sales only, regardless of the period
+  // toggle above (a "today leaderboard" stays meaningful even while
+  // viewing Month/Year revenue elsewhere on the page).
+  const todaySales = useMemo(() => {
+    const start = periodStart("day").toISOString();
+    return sales.filter((s) => s.created_at >= start);
+  }, [sales]);
+
+  const salesLeaderboard = useMemo(() => {
+    const map: Record<string, { name: string; revenue: number; count: number }> = {};
+    for (const s of todaySales) {
+      const key = s.staff_id ?? "unassigned";
+      const name = s.staff_id ? staffById[s.staff_id] ?? "Unknown" : "Unassigned";
+      map[key] = map[key] ?? { name, revenue: 0, count: 0 };
+      map[key].revenue += Number(s.final_amount ?? 0);
+      map[key].count += 1;
+    }
+    return Object.values(map).sort((a, b) => b.revenue - a.revenue);
+  }, [todaySales, staffById]);
+
+  // Target Progress — independent of the period toggle: always compares
+  // today/this-week/this-month revenue against their own saved target.
+  const dayRevenue = useMemo(() => sales.filter((s) => s.created_at >= periodStart("day").toISOString()).reduce((s, r) => s + Number(r.final_amount ?? 0), 0), [sales]);
+  const weekRevenue = useMemo(() => sales.filter((s) => s.created_at >= periodStart("week").toISOString()).reduce((s, r) => s + Number(r.final_amount ?? 0), 0), [sales]);
+  const monthRevenue = useMemo(() => sales.filter((s) => s.created_at >= periodStart("month").toISOString()).reduce((s, r) => s + Number(r.final_amount ?? 0), 0), [sales]);
+
+  const targetRows: { key: "daily" | "weekly" | "monthly"; label: string; revenue: number }[] = [
+    { key: "daily", label: "Daily", revenue: dayRevenue },
+    { key: "weekly", label: "Weekly", revenue: weekRevenue },
+    { key: "monthly", label: "Monthly", revenue: monthRevenue },
+  ];
+
+  async function saveTarget(periodKey: "daily" | "weekly" | "monthly") {
+    const raw = targetDrafts[periodKey];
+    const amount = Number(raw);
+    if (!Number.isFinite(amount) || amount < 0) return;
+    setSavingTarget(periodKey);
+    await supabase.from("sales_targets").upsert({ period: periodKey, target_amount: amount }, { onConflict: "period" });
+    setTargets((prev) => ({ ...prev, [periodKey]: amount }));
+    setTargetDrafts((prev) => ({ ...prev, [periodKey]: "" }));
+    setSavingTarget(null);
   }
 
   const cards = [
-    { label: "Today's Sales", value: formatCurrency(metrics.todayRevenue), icon: IndianRupee, iconColor: "text-gold" },
-    { label: "Pending Repair Enquiries", value: metrics.pendingRepairEnquiries.toString(), icon: Wrench, iconColor: "text-gold", to: "/repair-enquiries" },
-    { label: "Pending Website Orders", value: metrics.pendingWebsiteOrders.toString(), icon: ShoppingBag, iconColor: "text-brand-primary", to: "/web-orders" },
-    { label: "Low Stock Products", value: metrics.lowStockCount.toString(), icon: Package, iconColor: "text-brand-danger", to: "/inventory" },
+    { label: "Total Revenue", value: formatCurrency(totalRevenue), icon: IndianRupee, iconColor: "text-gold" },
+    { label: "Gross Profit", value: formatCurrency(grossProfit), icon: TrendingUp, iconColor: "text-brand-success" },
+    { label: "Invoice Count", value: invoiceCount.toString(), icon: Receipt, iconColor: "text-brand-primary", to: "/sales" },
+    { label: "Live Stock Value", value: formatCurrency(liveStockValue), icon: Boxes, iconColor: "text-gold", to: "/inventory" },
+  ];
+
+  const secondaryCards = [
+    { label: "Pending Repair Enquiries", value: pendingRepairEnquiries.toString(), icon: Wrench, iconColor: "text-gold", to: "/repair-enquiries" },
+    { label: "Pending Website Orders", value: pendingWebsiteOrders.toString(), icon: ShoppingBag, iconColor: "text-brand-primary", to: "/web-orders" },
+    { label: "Low Stock Products", value: lowStock.length.toString(), icon: Package, iconColor: "text-brand-danger", to: "/inventory" },
+  ];
+
+  const PERIODS: { key: Period; label: string }[] = [
+    { key: "day", label: "Day" },
+    { key: "week", label: "Week" },
+    { key: "month", label: "Month" },
+    { key: "year", label: "Year" },
   ];
 
   return (
     <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h1 className="text-lg font-semibold text-gray-800">Dashboard</h1>
+        <div className="flex rounded-lg border border-border bg-card p-0.5">
+          {PERIODS.map((p) => (
+            <button
+              key={p.key}
+              onClick={() => setPeriod(p.key)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                period === p.key ? "bg-brand-primary text-white" : "text-gray-500 hover:text-gray-800"
+              }`}
+            >
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         {cards.map((c) => {
           const Card = (
@@ -106,7 +384,249 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="card p-4 lg:col-span-2">
+        <div className="card p-4">
+          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Payment Mode Split</div>
+          <ul className="space-y-2">
+            {(Object.entries(paymentSplit.byMode) as [string, number][])
+              .filter(([mode]) => mode !== "Other" || paymentSplit.byMode.Other > 0)
+              .map(([mode, amount]) => (
+                <li key={mode} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-600">{mode}</span>
+                  <span className="font-medium text-gray-800">{formatCurrency(amount)}</span>
+                </li>
+              ))}
+          </ul>
+        </div>
+
+        <div className="card p-4">
+          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Top Selling Products</div>
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th className="text-right">Qty</th>
+                <th className="text-right">Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {topProducts.map((p) => (
+                <tr key={p.name}>
+                  <td className="truncate max-w-[140px]">{p.name}</td>
+                  <td className="text-right">{p.qty}</td>
+                  <td className="text-right">{formatCurrency(p.revenue)}</td>
+                </tr>
+              ))}
+              {topProducts.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="py-4 text-center text-gray-400">No sales in this period</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="card p-4">
+          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Inventory Health</div>
+          <div className="mb-3 flex items-center justify-between text-sm">
+            <span className="text-gray-600">Live stock value</span>
+            <span className="font-medium text-gray-800">{formatCurrency(liveStockValue)}</span>
+          </div>
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Low stock ({lowStock.length})
+          </div>
+          <ul className="space-y-1.5">
+            {lowStock.slice(0, 6).map((p) => (
+              <li key={p.id} className="flex items-center justify-between text-sm">
+                <span className="truncate text-gray-700">{p.name}</span>
+                <span className="flex items-center gap-1.5">
+                  {highDemandLowStock.some((h) => h.id === p.id) && (
+                    <span className="pill-warning text-[10px]">high demand</span>
+                  )}
+                  <span className="pill-danger">{p.stock} left</span>
+                </span>
+              </li>
+            ))}
+            {lowStock.length === 0 && <p className="text-sm text-gray-400">All stocked up</p>}
+          </ul>
+        </div>
+      </div>
+
+      {/* Dead Stock Monitoring */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <AlertTriangle size={15} className="text-amber-500" />
+            Dead Stock Monitoring
+          </div>
+          <div className="flex rounded-lg border border-border bg-page p-0.5">
+            {[60, 90].map((d) => (
+              <button
+                key={d}
+                onClick={() => setDeadStockDays(d)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition-colors ${
+                  deadStockDays === d ? "bg-brand-primary text-white" : "text-gray-500 hover:text-gray-800"
+                }`}
+              >
+                {d}+ days
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="mt-1 text-xs text-gray-500">
+          Items with no sale in the last {deadStockDays} days — worth a clearance discount to free up shelf space.
+        </p>
+        <div className="mt-3 overflow-x-auto">
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th>Category</th>
+                <th className="text-right">Stock</th>
+                <th className="text-right">Value Tied Up</th>
+                <th className="text-right">Days Since Last Sale</th>
+              </tr>
+            </thead>
+            <tbody>
+              {deadStock.slice(0, 10).map((p) => (
+                <tr key={p.id}>
+                  <td className="font-medium">{p.name}</td>
+                  <td className="text-gray-500">{p.category ?? "-"}</td>
+                  <td className="text-right">{p.stock}</td>
+                  <td className="text-right">{formatCurrency(p.price * p.stock)}</td>
+                  <td className="text-right">
+                    <span className="pill-warning">{p.lastSoldAt ? `${p.daysSince}d` : "Never sold"}</span>
+                  </td>
+                </tr>
+              ))}
+              {deadStock.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="py-4 text-center text-gray-400">No dead stock — everything's moving.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Service & Repair Metrics */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="card p-4">
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <Wrench size={15} className="text-brand-primary" />
+            Job Card Funnel
+          </div>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {OPEN_REPAIR_STATUSES.map((s) => (
+              <div key={s} className="rounded-lg border border-border p-2.5 text-center">
+                <div className="font-serif text-xl font-semibold text-gray-800">{repairFunnel[s] ?? 0}</div>
+                <div className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-500">{REPAIR_STATUS_LABEL[s]}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="card p-4">
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <Wrench size={15} className="text-gold" />
+            Technician Efficiency
+          </div>
+          <table className="table-base">
+            <thead>
+              <tr>
+                <th>Technician</th>
+                <th className="text-right">Completed</th>
+                <th className="text-right">Pending</th>
+              </tr>
+            </thead>
+            <tbody>
+              {technicianEfficiency.map((t) => (
+                <tr key={t.name}>
+                  <td className="font-medium">{t.name}</td>
+                  <td className="text-right text-brand-success">{t.completed}</td>
+                  <td className="text-right text-brand-warning">{t.pending}</td>
+                </tr>
+              ))}
+              {technicianEfficiency.length === 0 && (
+                <tr>
+                  <td colSpan={3} className="py-4 text-center text-gray-400">No repairs assigned to any technician yet</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Staff Accountability & Goals */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="card p-4">
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <Trophy size={15} className="text-gold" />
+            Salesman Leaderboard — Today
+          </div>
+          <ul className="space-y-2">
+            {salesLeaderboard.map((s, i) => (
+              <li key={s.name} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${i === 0 ? "bg-gold text-white" : "bg-gray-100 text-gray-500"}`}>
+                    {i + 1}
+                  </span>
+                  <span className="text-gray-700">{s.name}</span>
+                </span>
+                <span className="text-gray-500">{s.count} sale{s.count === 1 ? "" : "s"} · <span className="font-medium text-gray-800">{formatCurrency(s.revenue)}</span></span>
+              </li>
+            ))}
+            {salesLeaderboard.length === 0 && <p className="text-sm text-gray-400">No sales recorded today yet.</p>}
+          </ul>
+        </div>
+
+        <div className="card p-4">
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <Target size={15} className="text-brand-primary" />
+            Target Progress
+          </div>
+          <div className="space-y-3">
+            {targetRows.map((t) => {
+              const target = targets[t.key] ?? 0;
+              const pct = target > 0 ? Math.min(100, Math.round((t.revenue / target) * 100)) : 0;
+              return (
+                <div key={t.key}>
+                  <div className="mb-1 flex items-center justify-between text-xs">
+                    <span className="font-medium text-gray-600">{t.label}</span>
+                    <span className="text-gray-500">
+                      {formatCurrency(t.revenue)} / {target > 0 ? formatCurrency(target) : "no target set"}
+                    </span>
+                  </div>
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
+                    <div
+                      className={`h-full rounded-full ${pct >= 100 ? "bg-brand-success" : "bg-brand-primary"}`}
+                      style={{ width: `${target > 0 ? pct : 0}%` }}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <input
+                      type="number"
+                      className="input !w-32 !py-1 text-xs"
+                      placeholder={`Set ${t.label.toLowerCase()} target`}
+                      value={targetDrafts[t.key] ?? ""}
+                      onChange={(e) => setTargetDrafts((prev) => ({ ...prev, [t.key]: e.target.value }))}
+                    />
+                    <button
+                      className="btn-ghost !px-2 !py-1 text-xs"
+                      disabled={savingTarget === t.key || !targetDrafts[t.key]}
+                      onClick={() => saveTarget(t.key)}
+                    >
+                      <Save size={12} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="card p-4 lg:col-span-3">
           <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Recent Website Orders</div>
           <div className="overflow-x-auto">
             <table className="table-base min-w-[560px]">
@@ -138,19 +658,18 @@ export function Dashboard() {
             </table>
           </div>
         </div>
+      </div>
 
-        <div className="card p-4">
-          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Low Stock Alerts (&lt; 5)</div>
-          <ul className="space-y-1.5">
-            {lowStock.map((p) => (
-              <li key={p.id} className="flex justify-between text-sm">
-                <span className="text-gray-700">{p.name}</span>
-                <span className="pill-danger">{p.stock} left</span>
-              </li>
-            ))}
-            {lowStock.length === 0 && <p className="text-sm text-gray-400">All stocked up</p>}
-          </ul>
-        </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        {secondaryCards.map((c) => (
+          <Link key={c.label} to={c.to} className="card flex items-center justify-between p-3 transition-shadow hover:shadow-cardHover">
+            <span className="text-sm text-gray-600">{c.label}</span>
+            <span className="flex items-center gap-2 font-serif text-lg font-semibold text-gray-800">
+              {c.value}
+              <c.icon size={16} className={c.iconColor} />
+            </span>
+          </Link>
+        ))}
       </div>
     </div>
   );

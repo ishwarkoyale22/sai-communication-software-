@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, X, Edit2, Trash2, Check, AlertCircle, Upload, Loader2 } from "lucide-react";
+import { Plus, X, Edit2, Trash2, Check, AlertCircle, Upload, Loader2, Printer } from "lucide-react";
 import { formatCurrency } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
@@ -53,6 +53,7 @@ interface InventoryItem {
   warranty_months: number;
   is_featured: boolean;
   is_active: boolean;
+  cost_price: number | null;
 }
 
 // Must exactly match the live `inventory_category_check` constraint —
@@ -75,11 +76,23 @@ const emptyForm = {
   warranty_months: 0,
   is_featured: false,
   image_url: "",
+  cost_price: 0,
 };
+
+type SortKey = "name" | "price_desc" | "stock_asc" | "stock_desc" | "category";
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Name (A-Z)" },
+  { key: "category", label: "Category" },
+  { key: "price_desc", label: "Price (High-Low)" },
+  { key: "stock_asc", label: "Stock (Low-High)" },
+  { key: "stock_desc", label: "Stock (High-Low)" },
+];
 
 export function Inventory() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [category, setCategory] = useState<string>("All");
+  const [brandFilter, setBrandFilter] = useState<string>("All");
+  const [sortKey, setSortKey] = useState<SortKey>("name");
   const [search, setSearch] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
@@ -139,7 +152,9 @@ export function Inventory() {
   }
 
   async function loadBrands() {
-    const { data } = await supabase.from("brands").select("id, name, is_active").eq("is_active", true).order("name");
+    // All brands (not just active) so the filter/report still resolves a
+    // name for products tagged with a brand that was since deactivated.
+    const { data } = await supabase.from("brands").select("id, name, is_active").order("name");
     setBrands((data as Brand[]) ?? []);
   }
 
@@ -181,6 +196,7 @@ export function Inventory() {
         is_featured: form.is_featured,
         images: form.image_url.trim() ? [form.image_url.trim()] : [],
         is_active: true,
+        cost_price: Number(form.cost_price) || null,
       });
 
       if (insertErr) throw insertErr;
@@ -224,6 +240,7 @@ export function Inventory() {
           is_featured: editingItem.is_featured,
           images: editingItem.images ?? [],
           is_active: editingItem.is_active,
+          cost_price: editingItem.cost_price == null ? null : Number(editingItem.cost_price),
         })
         .eq("id", editingItem.id);
 
@@ -263,13 +280,95 @@ export function Inventory() {
     load();
   }
 
-  const filtered = items.filter((p) => {
-    if (category !== "All" && p.category !== category) return false;
-    if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.model?.toLowerCase().includes(search.toLowerCase())) {
-      return false;
+  const filtered = items
+    .filter((p) => {
+      if (category !== "All" && p.category !== category) return false;
+      if (brandFilter !== "All" && (p.brand_id ?? "") !== brandFilter) return false;
+      if (search && !p.name.toLowerCase().includes(search.toLowerCase()) && !p.model?.toLowerCase().includes(search.toLowerCase())) {
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortKey === "price_desc") return b.price - a.price;
+      if (sortKey === "stock_asc") return a.stock - b.stock;
+      if (sortKey === "stock_desc") return b.stock - a.stock;
+      if (sortKey === "category") {
+        const catCompare = (a.category ?? "").localeCompare(b.category ?? "");
+        return catCompare !== 0 ? catCompare : a.name.localeCompare(b.name);
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+  function productRowHtml(p: InventoryItem) {
+    return `<tr>
+          <td>${p.name} ${p.model}</td>
+          <td>${p.category ?? "-"}</td>
+          <td>${brandName(p.brand_id)}</td>
+          <td style="text-align:right">${formatCurrency(p.price)}</td>
+          <td style="text-align:right">${p.stock}</td>
+          <td style="text-align:right">${formatCurrency(p.price * p.stock)}</td>
+        </tr>`;
+  }
+
+  function printReport() {
+    const totalValue = filtered.reduce((s, p) => s + p.price * p.stock, 0);
+
+    // Category-wise report: when the "All Categories" filter is active and
+    // the report is sorted by Category, group products under a heading +
+    // subtotal per category instead of one flat list — this is what makes
+    // it an actual category-wise report rather than just a category-name
+    // column. Selecting a single category from the filter above still just
+    // prints that one category's flat list (grouping one group is
+    // pointless), and any other sort mode also stays flat.
+    const groupByCategory = category === "All" && sortKey === "category";
+
+    let bodyHtml: string;
+    if (groupByCategory) {
+      const groups: { category: string; items: InventoryItem[] }[] = [];
+      for (const p of filtered) {
+        const cat = p.category ?? "Uncategorized";
+        const last = groups[groups.length - 1];
+        if (last && last.category === cat) last.items.push(p);
+        else groups.push({ category: cat, items: [p] });
+      }
+      bodyHtml = groups
+        .map((g) => {
+          const groupValue = g.items.reduce((s, p) => s + p.price * p.stock, 0);
+          return `<tr class="cat-header"><td colspan="6">${g.category} (${g.items.length} item${g.items.length === 1 ? "" : "s"})</td></tr>
+            ${g.items.map(productRowHtml).join("")}
+            <tr class="cat-subtotal"><td colspan="5">Subtotal — ${g.category}</td><td style="text-align:right">${formatCurrency(groupValue)}</td></tr>`;
+        })
+        .join("");
+    } else {
+      bodyHtml = filtered.map(productRowHtml).join("");
     }
-    return true;
-  });
+
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return;
+    win.document.write(`<!doctype html><html><head><title>Inventory Report</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:24px;color:#1f2937}
+        h1{font-size:18px;margin-bottom:2px}
+        p{color:#6b7280;font-size:12px;margin-top:0}
+        table{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px}
+        th,td{border:1px solid #e5e7eb;padding:6px 8px;text-align:left}
+        th{background:#f8f9fa}
+        tfoot td{font-weight:bold}
+        tr.cat-header td{background:#eef1f6;font-weight:bold;border-top:2px solid #c7cede}
+        tr.cat-subtotal td{background:#f8f9fa;font-style:italic;color:#4b5563}
+      </style></head><body>
+      <h1>Inventory Report${groupByCategory ? " — Category-wise" : ""}</h1>
+      <p>Category: ${category} · Brand: ${brandFilter === "All" ? "All" : brandName(brandFilter)} · Sorted by: ${SORT_OPTIONS.find((s) => s.key === sortKey)?.label}</p>
+      <table>
+        <thead><tr><th>Product</th><th>Category</th><th>Brand</th><th style="text-align:right">Price</th><th style="text-align:right">Stock</th><th style="text-align:right">Value</th></tr></thead>
+        <tbody>${bodyHtml}</tbody>
+        <tfoot><tr><td colspan="5">Total Stock Value</td><td style="text-align:right">${formatCurrency(totalValue)}</td></tr></tfoot>
+      </table>
+      <script>window.onload = () => window.print();</script>
+      </body></html>`);
+    win.document.close();
+  }
 
   return (
     <div className="space-y-4">
@@ -285,11 +384,16 @@ export function Inventory() {
               Type: p.product_type,
               Price: p.price,
               "Original Price": p.original_price,
+              "Cost Price": p.cost_price,
               Stock: p.stock,
+              "Stock Value": p.price * p.stock,
               Active: p.is_active ? "Yes" : "No",
             }))}
             fileName="inventory"
           />
+          <button className="btn-secondary flex items-center gap-1.5" onClick={printReport} title="Print / save the current report view as PDF">
+            <Printer size={14} /> Print Report
+          </button>
           <button
             className="btn-primary flex items-center gap-1.5"
             onClick={() => {
@@ -326,6 +430,29 @@ export function Inventory() {
           {CATEGORY_OPTIONS.map((c) => (
             <option key={c} value={c}>
               {c}
+            </option>
+          ))}
+        </select>
+        <select
+          value={brandFilter}
+          onChange={(e) => setBrandFilter(e.target.value)}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-brand-primary"
+        >
+          <option value="All">All Brands</option>
+          {brands.map((b) => (
+            <option key={b.id} value={b.id}>
+              {b.name}
+            </option>
+          ))}
+        </select>
+        <select
+          value={sortKey}
+          onChange={(e) => setSortKey(e.target.value as SortKey)}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-brand-primary"
+        >
+          {SORT_OPTIONS.map((s) => (
+            <option key={s.key} value={s.key}>
+              Sort: {s.label}
             </option>
           ))}
         </select>
@@ -569,7 +696,7 @@ export function Inventory() {
                     }
                   >
                     <option value="">-</option>
-                    {brands.map((b) => (
+                    {brands.filter((b) => b.is_active).map((b) => (
                       <option key={b.id} value={b.id}>
                         {b.name}
                       </option>
@@ -619,6 +746,19 @@ export function Inventory() {
                   />
                 </Field>
               </div>
+
+              <Field label="Cost Price (₹) — used to compute Gross Profit on the Dashboard, leave blank if unknown">
+                <input
+                  type="number"
+                  className="input w-full"
+                  value={editingItem ? editingItem.cost_price ?? "" : form.cost_price}
+                  onChange={(e) =>
+                    editingItem
+                      ? setEditingItem({ ...editingItem, cost_price: e.target.value ? Number(e.target.value) : null })
+                      : setForm({ ...form, cost_price: Number(e.target.value) })
+                  }
+                />
+              </Field>
 
               {!editingItem && (
                 <Field label="Initial Stock">

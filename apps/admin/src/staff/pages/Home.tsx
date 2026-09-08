@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Clock, LogOut, Users, FileText, ListChecks, CalendarClock, Star, History, CalendarDays } from "lucide-react";
+import { Clock, LogOut, Users, FileText, ListChecks, CalendarClock, Star, History, CalendarDays, Wrench } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
 
@@ -29,6 +29,7 @@ const LINKS = [
   { to: "/portal/clients", label: "Clients", icon: Users },
   { to: "/portal/reports", label: "Reports", icon: FileText },
   { to: "/portal/tasks", label: "Tasks", icon: ListChecks },
+  { to: "/portal/repairs", label: "My Repairs", icon: Wrench },
   { to: "/portal/follow-ups", label: "Follow-ups", icon: CalendarClock },
   { to: "/portal/leave", label: "Leave", icon: CalendarDays },
   { to: "/portal/reviews", label: "Reviews", icon: Star },

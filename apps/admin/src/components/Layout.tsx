@@ -18,7 +18,14 @@ import {
   FileText,
   Star,
   Tag,
+  Wallet,
   Wand2,
+  Smile,
+  Handshake,
+  Truck,
+  Building2,
+  Image,
+  Settings as SettingsIcon,
   Menu,
   X,
 } from "lucide-react";
@@ -37,10 +44,13 @@ const NAV_GROUPS: {
     items: [
       { to: "/inventory", label: "Inventory", icon: Package },
       { to: "/sales", label: "Sales & Invoices", icon: Receipt },
+      { to: "/payments", label: "Payment Management", icon: Wallet },
       { to: "/web-orders", label: "Website Orders", icon: ShoppingBag },
       { to: "/gift-hampers", label: "Gift Hampers", icon: Gift },
       { to: "/brands", label: "Brands", icon: Tag },
       { to: "/services", label: "Service Management", icon: Wand2 },
+      { to: "/offers", label: "Offers", icon: Tag },
+      { to: "/gallery", label: "Gallery", icon: Image },
     ],
   },
   {
@@ -59,14 +69,22 @@ const NAV_GROUPS: {
     items: [
       { to: "/repair-enquiries", label: "Repair Enquiries", icon: MessageSquareText },
       { to: "/repairs", label: "Repairs", icon: Wrench },
+      { to: "/service-feedback", label: "Service Feedback", icon: Smile },
       { to: "/wholesaler-invoices", label: "Wholesaler Invoices", icon: FileUp },
       { to: "/third-party-purchases", label: "Third-Party Purchases", icon: ShoppingBag },
       { to: "/emi", label: "EMI / Finance", icon: CreditCard },
+      { to: "/finance-partners", label: "Finance Partners", icon: Handshake },
+      { to: "/suppliers", label: "Suppliers", icon: Truck },
+      { to: "/branches", label: "Branches", icon: Building2 },
     ],
   },
   {
     label: "Insights",
     items: [{ to: "/analytics", label: "Analytics", icon: BarChart3 }],
+  },
+  {
+    label: "Configuration",
+    items: [{ to: "/settings", label: "Settings", icon: SettingsIcon }],
   },
 ];
 

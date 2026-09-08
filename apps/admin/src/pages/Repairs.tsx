@@ -1,19 +1,27 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { formatCurrency, type Customer, type Staff } from "@sai/shared";
+import { formatCurrency, formatDateTime, type Customer, type Staff } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { LayoutGrid, List, Plus } from "lucide-react";
+import { LayoutGrid, List, Plus, PhoneCall } from "lucide-react";
 
+// Underlying values are unchanged (received/in_progress/waiting_parts/ready/
+// completed) to avoid an enum migration + touching every existing row —
+// only the on-screen labels are reworded to match the requirements doc's
+// "Called Up / Pending / Submitted->In Process / Repaired-Completed"
+// vocabulary. "Called Up" itself is tracked separately below via
+// `contacted_at`, since it's a contact-status orthogonal to repair progress
+// (a repair can be "in process" whether or not anyone has called the
+// customer back), not a stage in this same progression.
 const REPAIR_STATUSES = ["received", "in_progress", "waiting_parts", "ready", "completed"] as const;
 type RepairStatus = (typeof REPAIR_STATUSES)[number];
 
 const STATUS_LABEL: Record<string, string> = {
-  received: "Received",
-  in_progress: "In Progress",
+  received: "Submitted / Pending",
+  in_progress: "In Process",
   waiting_parts: "Waiting Parts",
-  ready: "Ready",
+  ready: "Repaired",
   completed: "Completed",
 };
 
@@ -33,6 +41,7 @@ interface RepairRow {
   technician_id: string | null;
   received_at: string;
   completed_at: string | null;
+  contacted_at: string | null;
   customer?: Customer | null;
   technician?: Staff | null;
 }
@@ -50,6 +59,7 @@ const emptyForm = {
 export function Repairs() {
   const [repairs, setRepairs] = useState<RepairRow[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [technicians, setTechnicians] = useState<Staff[]>([]);
   const [view, setView] = useState<"kanban" | "table">("kanban");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
@@ -57,6 +67,7 @@ export function Repairs() {
   useEffect(() => {
     load();
     supabase.from("customers").select("*").order("name").then(({ data }) => setCustomers((data as Customer[]) ?? []));
+    supabase.from("staff").select("*").eq("is_active", true).order("name").then(({ data }) => setTechnicians((data as Staff[]) ?? []));
     const channel = supabase
       .channel("repairs-page")
       .on("postgres_changes", { event: "*", schema: "public", table: "repairs" }, load)
@@ -86,6 +97,14 @@ export function Repairs() {
       .from("repairs")
       .update({ status, completed_at: status === "completed" ? new Date().toISOString() : null })
       .eq("id", id);
+  }
+
+  async function assignTechnician(id: string, technicianId: string) {
+    await supabase.from("repairs").update({ technician_id: technicianId || null }).eq("id", id);
+  }
+
+  async function markContacted(id: string) {
+    await supabase.from("repairs").update({ contacted_at: new Date().toISOString() }).eq("id", id);
   }
 
   async function addRepair() {
@@ -122,6 +141,7 @@ export function Repairs() {
               Device: `${r.device_brand} ${r.device_model}`,
               Problem: r.problem,
               Status: STATUS_LABEL[r.status] ?? r.status,
+              "Called Up": r.contacted_at ? formatDateTime(r.contacted_at) : "No",
               Technician: r.technician?.name,
               "Repair Cost": r.repair_cost,
               "Advance Paid": r.advance_paid,
@@ -151,8 +171,17 @@ export function Repairs() {
                   .filter((r) => r.status === status)
                   .map((r) => (
                     <div key={r.id} className="card p-2.5">
-                      <div className="text-sm font-medium">
-                        {r.device_brand} {r.device_model}
+                      <div className="flex items-start justify-between gap-1">
+                        <div className="text-sm font-medium">
+                          {r.device_brand} {r.device_model}
+                        </div>
+                        <button
+                          className={`shrink-0 rounded-full p-1 ${r.contacted_at ? "text-brand-success" : "text-gray-300 hover:text-gray-500"}`}
+                          onClick={() => markContacted(r.id)}
+                          title={r.contacted_at ? `Called up: ${formatDateTime(r.contacted_at)}` : "Mark as Called Up"}
+                        >
+                          <PhoneCall size={13} />
+                        </button>
                       </div>
                       <div className="text-xs text-gray-500">{r.customer_name}</div>
                       {r.enquiry_id && (
@@ -161,11 +190,21 @@ export function Repairs() {
                         </Link>
                       )}
                       <div className="mt-1 flex items-center justify-between text-xs text-gray-400">
-                        <span>{r.technician?.name ?? "Unassigned"}</span>
+                        <span>{r.contacted_at ? "Called up" : "Not called yet"}</span>
                         <span>{daysOpen(r)}d</span>
                       </div>
                       <select
-                        className="input mt-2 !py-1 text-xs"
+                        className="input mt-1.5 !py-1 text-xs"
+                        value={r.technician_id ?? ""}
+                        onChange={(e) => assignTechnician(r.id, e.target.value)}
+                      >
+                        <option value="">Unassigned</option>
+                        {technicians.map((t) => (
+                          <option key={t.id} value={t.id}>{t.name}</option>
+                        ))}
+                      </select>
+                      <select
+                        className="input mt-1.5 !py-1 text-xs"
                         value={r.status}
                         onChange={(e) => setStatus(r.id, e.target.value as RepairStatus)}
                       >
@@ -190,6 +229,7 @@ export function Repairs() {
                 <th>Device</th>
                 <th>Problem</th>
                 <th>Status</th>
+                <th>Called Up?</th>
                 <th>Technician</th>
                 <th className="text-right">Cost</th>
                 <th className="text-right">Days Open</th>
@@ -209,6 +249,15 @@ export function Repairs() {
                   <td>
                     <StatusPill status={r.status} label={STATUS_LABEL[r.status] ?? r.status} />
                   </td>
+                  <td>
+                    {r.contacted_at ? (
+                      <StatusPill status="active" label={formatDateTime(r.contacted_at)} />
+                    ) : (
+                      <button className="btn-ghost !py-0.5 text-xs" onClick={() => markContacted(r.id)}>
+                        <PhoneCall size={12} /> Mark called
+                      </button>
+                    )}
+                  </td>
                   <td>{r.technician?.name ?? "-"}</td>
                   <td className="text-right">{formatCurrency(r.repair_cost ?? 0)}</td>
                   <td className="text-right">{daysOpen(r)}</td>
@@ -216,7 +265,7 @@ export function Repairs() {
               ))}
               {repairs.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-gray-400">
+                  <td colSpan={8} className="py-8 text-center text-gray-400">
                     No repairs found
                   </td>
                 </tr>

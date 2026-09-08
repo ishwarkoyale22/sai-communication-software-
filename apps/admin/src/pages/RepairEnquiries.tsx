@@ -22,6 +22,7 @@ interface LinkedRepair {
   id: string;
   enquiry_id: string;
   status: string;
+  contacted_at: string | null;
 }
 
 export function RepairEnquiries() {
@@ -45,7 +46,7 @@ export function RepairEnquiries() {
   async function load() {
     const [{ data: enqData, error: enqErr }, { data: repairData, error: repErr }] = await Promise.all([
       supabase.from("repair_enquiries").select("*").order("created_at", { ascending: false }),
-      supabase.from("repairs").select("id, enquiry_id, status").not("enquiry_id", "is", null),
+      supabase.from("repairs").select("id, enquiry_id, status, contacted_at").not("enquiry_id", "is", null),
     ]);
     if (enqErr) {
       setError(`Failed to load repair enquiries: ${enqErr.message}`);
@@ -165,14 +166,19 @@ export function RepairEnquiries() {
                   </td>
                   <td>
                     {linkedRepair ? (
-                      <Link
-                        to="/repairs"
-                        className="inline-flex items-center gap-1 text-xs font-medium text-brand-primary hover:underline"
-                      >
-                        <Wrench className="size-3.5" />
-                        <span className="text-gray-400">({linkedRepair.status})</span>
-                        <ArrowRight className="size-3" />
-                      </Link>
+                      <div className="space-y-0.5">
+                        <Link
+                          to="/repairs"
+                          className="inline-flex items-center gap-1 text-xs font-medium text-brand-primary hover:underline"
+                        >
+                          <Wrench className="size-3.5" />
+                          <span className="text-gray-400">({linkedRepair.status})</span>
+                          <ArrowRight className="size-3" />
+                        </Link>
+                        <div className={`text-[11px] ${linkedRepair.contacted_at ? "text-brand-success" : "text-gray-400"}`}>
+                          {linkedRepair.contacted_at ? "Followed up" : "Not followed up yet"}
+                        </div>
+                      </div>
                     ) : (
                       <button
                         className="btn-primary !py-1 !px-3 text-xs"

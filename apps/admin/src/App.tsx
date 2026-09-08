@@ -27,6 +27,14 @@ const GiftHampers = lazy(() => import("./pages/GiftHampers").then((m) => ({ defa
 const WholesalerInvoices = lazy(() => import("./pages/WholesalerInvoices").then((m) => ({ default: m.WholesalerInvoices })));
 const ThirdPartyPurchases = lazy(() => import("./pages/ThirdPartyPurchases").then((m) => ({ default: m.ThirdPartyPurchases })));
 const Emi = lazy(() => import("./pages/Emi").then((m) => ({ default: m.Emi })));
+const Payments = lazy(() => import("./pages/Payments").then((m) => ({ default: m.Payments })));
+const Offers = lazy(() => import("./pages/Offers").then((m) => ({ default: m.Offers })));
+const ServiceFeedback = lazy(() => import("./pages/ServiceFeedback").then((m) => ({ default: m.ServiceFeedback })));
+const FinancePartners = lazy(() => import("./pages/FinancePartners").then((m) => ({ default: m.FinancePartners })));
+const Branches = lazy(() => import("./pages/Branches").then((m) => ({ default: m.Branches })));
+const Suppliers = lazy(() => import("./pages/Suppliers").then((m) => ({ default: m.Suppliers })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const Gallery = lazy(() => import("./pages/Gallery").then((m) => ({ default: m.Gallery })));
 const StaffManagement = lazy(() => import("./pages/StaffManagement").then((m) => ({ default: m.StaffManagement })));
 const StaffPortal = lazy(() => import("./pages/StaffPortal").then((m) => ({ default: m.StaffPortal })));
 const Analytics = lazy(() => import("./pages/Analytics").then((m) => ({ default: m.Analytics })));
@@ -45,6 +53,7 @@ const StaffHome = lazy(() => import("./staff/pages/Home").then((m) => ({ default
 const StaffAttendance = lazy(() => import("./staff/pages/Attendance").then((m) => ({ default: m.AttendancePage })));
 const StaffLeave = lazy(() => import("./staff/pages/Leave").then((m) => ({ default: m.LeavePage })));
 const StaffTasks = lazy(() => import("./staff/pages/Tasks").then((m) => ({ default: m.TasksPage })));
+const StaffRepairs = lazy(() => import("./staff/pages/Repairs").then((m) => ({ default: m.RepairsPage })));
 const StaffClients = lazy(() => import("./staff/pages/Clients").then((m) => ({ default: m.Clients })));
 const StaffFollowUps = lazy(() => import("./staff/pages/FollowUps").then((m) => ({ default: m.FollowUps })));
 const StaffClientReports = lazy(() => import("./staff/pages/ClientReports").then((m) => ({ default: m.ClientReports })));
@@ -121,6 +130,14 @@ export default function App() {
                 <Route path="/wholesaler-invoices" element={<WholesalerInvoices />} />
                 <Route path="/third-party-purchases" element={<ThirdPartyPurchases />} />
                 <Route path="/emi" element={<Emi />} />
+                <Route path="/payments" element={<Payments />} />
+                <Route path="/offers" element={<Offers />} />
+                <Route path="/service-feedback" element={<ServiceFeedback />} />
+                <Route path="/finance-partners" element={<FinancePartners />} />
+                <Route path="/branches" element={<Branches />} />
+                <Route path="/suppliers" element={<Suppliers />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/gallery" element={<Gallery />} />
                 <Route path="/staff" element={<StaffManagement />} />
                 <Route path="/staff-portal" element={<StaffPortal />} />
                 <Route path="/analytics" element={<Analytics />} />
@@ -138,6 +155,7 @@ export default function App() {
                 <Route path="/portal/attendance" element={<StaffAttendance />} />
                 <Route path="/portal/leave" element={<StaffLeave />} />
                 <Route path="/portal/tasks" element={<StaffTasks />} />
+                <Route path="/portal/repairs" element={<StaffRepairs />} />
                 <Route path="/portal/clients" element={<StaffClients />} />
                 <Route path="/portal/follow-ups" element={<StaffFollowUps />} />
                 <Route path="/portal/reports" element={<StaffClientReports />} />

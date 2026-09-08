@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
-import { formatCurrency, formatDateTime } from "@sai/shared";
-import { supabase } from "../lib/supabase";
+import { Fragment, useEffect, useState } from "react";
+import { formatCurrency, formatDateTime, generateSimpleInvoicePdf } from "@sai/shared";
+import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { ShoppingBag, Search, CreditCard, ChevronDown, ChevronUp } from "lucide-react";
+import { ShoppingBag, Search, CreditCard, ChevronDown, ChevronUp, FileText } from "lucide-react";
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pending" },
@@ -97,6 +97,40 @@ export function WebOrders() {
     } finally {
       setUpdatingId(null);
     }
+  }
+
+  async function handleOrderTypeChange(orderId: string, orderType: string) {
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, order_type: orderType } : o)));
+    const { error: updateErr } = await supabase.from("website_orders").update({ order_type: orderType }).eq("id", orderId);
+    if (updateErr) alert(`Failed to update order type: ${updateErr.message}`);
+  }
+
+  function generateBill(order: Order) {
+    // Gift orders are still paid for (someone buying a hamper to send) —
+    // only a true giveaway (free by definition) zeroes out the amount. Both
+    // get a distinctly labeled bill from regular product orders, per the
+    // requirement's "separate bill generation for gift / giveaway orders".
+    const isGiveaway = order.order_type === "giveaway";
+    const isGiftOrGiveaway = order.order_type === "gift" || isGiveaway;
+    generateSimpleInvoicePdf({
+      invoiceNumber: order.order_number,
+      customerName: order.customer_name,
+      customerPhone: order.customer_phone,
+      paymentMethod: isGiveaway ? "giveaway / no charge" : order.payment_method,
+      paymentStatus: isGiveaway ? undefined : order.payment_status,
+      createdAt: order.created_at,
+      items: (order.website_order_items ?? []).map((i) => ({
+        name: i.item_name,
+        quantity: i.quantity,
+        unitPrice: isGiveaway ? 0 : i.unit_price,
+        totalPrice: isGiveaway ? 0 : i.total_price,
+      })),
+      totalAmount: isGiveaway ? 0 : order.total_amount,
+      finalAmount: isGiveaway ? 0 : order.total_amount,
+      shop: SHOP,
+      mode: "download",
+      billLabel: isGiftOrGiveaway ? (isGiveaway ? "GIVEAWAY BILL" : "GIFT ORDER BILL") : undefined,
+    });
   }
 
   const filtered = orders.filter((o) => {
@@ -211,8 +245,8 @@ export function WebOrders() {
                 const itemCount = order.website_order_items?.reduce((s, i) => s + i.quantity, 0) ?? 0;
 
                 return (
-                  <>
-                    <tr key={order.id} className={`group hover:bg-gray-50/80 ${isExpanded ? "bg-amber-50/20" : ""}`}>
+                  <Fragment key={order.id}>
+                    <tr className={`group hover:bg-gray-50/80 ${isExpanded ? "bg-amber-50/20" : ""}`}>
                       <td>
                         <button
                           onClick={() => setExpandedOrderId(isExpanded ? null : order.id)}
@@ -229,7 +263,17 @@ export function WebOrders() {
                         <div className="font-medium text-gray-900">{order.customer_name}</div>
                         <div className="text-xs text-gray-500">{order.customer_phone}</div>
                       </td>
-                      <td className="text-xs capitalize">{order.order_type}</td>
+                      <td>
+                        <select
+                          className="input !w-auto !py-1 text-xs capitalize"
+                          value={order.order_type}
+                          onChange={(e) => handleOrderTypeChange(order.id, e.target.value)}
+                        >
+                          <option value="product">Product</option>
+                          <option value="gift">Gift</option>
+                          <option value="giveaway">Giveaway</option>
+                        </select>
+                      </td>
                       <td>
                         <div className="text-xs font-medium text-gray-800">{itemCount} {itemCount === 1 ? "item" : "items"}</div>
                         <div className="text-[11px] text-gray-500 truncate max-w-[180px]">
@@ -248,18 +292,27 @@ export function WebOrders() {
                         <StatusPill status={order.order_status} label={order.order_status} />
                       </td>
                       <td>
-                        <select
-                          disabled={updatingId === order.id}
-                          className="input !w-auto !py-1 text-xs font-medium capitalize"
-                          value={order.order_status}
-                          onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                        >
-                          {STATUS_OPTIONS.map((opt) => (
-                            <option key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
+                        <div className="flex items-center gap-1">
+                          <select
+                            disabled={updatingId === order.id}
+                            className="input !w-auto !py-1 text-xs font-medium capitalize"
+                            value={order.order_status}
+                            onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                          >
+                            {STATUS_OPTIONS.map((opt) => (
+                              <option key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            className="btn-ghost !px-2 !py-1 text-xs"
+                            onClick={() => generateBill(order)}
+                            title={order.order_type === "product" ? "Download bill" : "Download gift/giveaway bill"}
+                          >
+                            <FileText size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
 
@@ -295,7 +348,7 @@ export function WebOrders() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })
             )}

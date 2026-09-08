@@ -1,6 +1,17 @@
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import * as autoTableModule from "jspdf-autotable";
 import { formatCurrency, formatDate } from "./format";
+
+// See simpleInvoice.ts for why this isn't a plain default import — same
+// UMD/dep-optimizer double-wrapping applies here.
+const autoTableExports = autoTableModule as any;
+const autoTable = (
+  typeof autoTableExports === "function"
+    ? autoTableExports
+    : typeof autoTableExports.default === "function"
+      ? autoTableExports.default
+      : autoTableExports.default?.default
+) as (doc: jsPDF, options: any) => void;
 import type { Sale, SaleItem, Customer, Product } from "./types";
 
 export interface GstInvoiceInput {
