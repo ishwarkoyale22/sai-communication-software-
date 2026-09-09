@@ -21,6 +21,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default:
 const Inventory = lazy(() => import("./pages/Inventory").then((m) => ({ default: m.Inventory })));
 const Sales = lazy(() => import("./pages/Sales").then((m) => ({ default: m.Sales })));
 const Customers = lazy(() => import("./pages/Customers").then((m) => ({ default: m.Customers })));
+const Birthdays = lazy(() => import("./pages/Birthdays").then((m) => ({ default: m.Birthdays })));
 const Repairs = lazy(() => import("./pages/Repairs").then((m) => ({ default: m.Repairs })));
 const RepairEnquiries = lazy(() => import("./pages/RepairEnquiries").then((m) => ({ default: m.RepairEnquiries })));
 const GiftHampers = lazy(() => import("./pages/GiftHampers").then((m) => ({ default: m.GiftHampers })));
@@ -119,6 +120,7 @@ export default function App() {
                 <Route path="/sales" element={<Sales />} />
                 <Route path="/web-orders" element={<WebOrders />} />
                 <Route path="/customers" element={<Customers />} />
+                <Route path="/birthdays" element={<Birthdays />} />
                 <Route path="/enquiries" element={<Enquiries />} />
                 <Route path="/client-reports" element={<ClientReports />} />
                 <Route path="/reviews" element={<Reviews />} />

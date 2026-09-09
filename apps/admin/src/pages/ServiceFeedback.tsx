@@ -3,7 +3,7 @@ import { formatDateTime, formatDate } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Copy, Star, RefreshCw } from "lucide-react";
+import { Copy, Star, RefreshCw, MessageCircle, Check, AlertTriangle } from "lucide-react";
 
 // A `service_feedback` row is auto-created (see migration 0020's
 // repairs_create_feedback_trigger) the moment a repair's status flips to
@@ -29,10 +29,36 @@ interface RepairLite {
   device_model: string;
 }
 
-// Where the customer-facing feedback form lives. Until the real customer
-// website's feedback page exists, this points at a placeholder path — swap
-// FEEDBACK_BASE_URL once that page is built (see Phase 3 notes).
-const FEEDBACK_BASE_URL = "https://saicommunication.example/feedback";
+// Where the customer-facing feedback form lives — src/routes/feedback.$token.tsx
+// on the public website. The production domain hasn't been purchased yet,
+// so there is nothing real to hardcode here. VITE_CUSTOMER_SITE_URL is read
+// at build time — set it (e.g. "https://sai-communication.in", no trailing
+// slash) once the domain exists, and every feedback link below starts
+// working immediately with no further code change. Until then this stays
+// unset on purpose: no placeholder/fake domain, ever.
+const CUSTOMER_SITE_URL = (import.meta.env.VITE_CUSTOMER_SITE_URL as string | undefined)?.replace(/\/$/, "") || null;
+
+const FEEDBACK_PATH = (token: string) => `/feedback/${token}`;
+
+/** Full shareable URL, or null if VITE_CUSTOMER_SITE_URL isn't configured yet. */
+function feedbackUrl(token: string): string | null {
+  return CUSTOMER_SITE_URL ? `${CUSTOMER_SITE_URL}${FEEDBACK_PATH(token)}` : null;
+}
+
+// There's no SMS/WhatsApp Business API integration configured anywhere in
+// this codebase (no Twilio/Gupshup/etc. credentials or calls exist) — so
+// "send" here means a wa.me deep link pre-filled with the message and
+// feedback link, which opens WhatsApp with everything ready and admin taps
+// Send. This is the same pattern already used for the site's other
+// WhatsApp buttons (SiteHeader.tsx), not a placeholder. Requires a real
+// feedbackUrl (see above) — there's no wa.me link without one.
+function waFeedbackLink(repair: RepairLite, link: string) {
+  const digits = repair.phone.replace(/\D/g, "");
+  const msg =
+    `Hi ${repair.customer_name}, your ${repair.device_brand} ${repair.device_model} repair is complete! ` +
+    `We'd really appreciate your feedback: ${link}`;
+  return `https://wa.me/91${digits}?text=${encodeURIComponent(msg)}`;
+}
 
 export function ServiceFeedback() {
   const [rows, setRows] = useState<FeedbackRow[]>([]);
@@ -66,7 +92,10 @@ export function ServiceFeedback() {
   }
 
   function copyLink(row: FeedbackRow) {
-    const link = `${FEEDBACK_BASE_URL}/${row.token}`;
+    // Falls back to just the path (e.g. "/feedback/abc123") when no domain
+    // is configured yet — still useful to paste into a browser on the same
+    // dev/staging host, and never a fake URL that looks live but isn't.
+    const link = feedbackUrl(row.token) ?? FEEDBACK_PATH(row.token);
     navigator.clipboard?.writeText(link).catch(() => {});
     setCopiedId(row.id);
     setTimeout(() => setCopiedId(null), 2000);
@@ -92,9 +121,21 @@ export function ServiceFeedback() {
         />
       </div>
       <p className="text-sm text-gray-500">
-        Created automatically when a repair is marked Completed. Share the link with the customer (SMS/WhatsApp
-        integration not yet configured — copy the link below and send manually for now).
+        Created automatically when a repair is marked Completed. Tap <MessageCircle size={12} className="inline" /> to
+        open WhatsApp with the feedback link pre-filled and ready to send, or copy the link to share another way.
       </p>
+
+      {!CUSTOMER_SITE_URL && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <span>
+            No customer website domain is configured yet (<code className="rounded bg-amber-100 px-1 py-0.5 text-xs">VITE_CUSTOMER_SITE_URL</code>{" "}
+            is unset), so WhatsApp sending is disabled and "Copy link" only copies the feedback path, not a full
+            working link. Once the domain is purchased, set that environment variable and this starts working
+            immediately — no code change needed.
+          </span>
+        </div>
+      )}
 
       {pendingReschedule.length > 0 && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
@@ -154,9 +195,39 @@ export function ServiceFeedback() {
                     />
                   </td>
                   <td className="text-right">
-                    <button className="btn-ghost !px-2 !py-1 text-xs" onClick={() => copyLink(r)}>
-                      <Copy size={12} /> {copiedId === r.id ? "Copied!" : "Copy link"}
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      {repair && (
+                        (() => {
+                          const link = feedbackUrl(r.token);
+                          return link ? (
+                            <a
+                              href={waFeedbackLink(repair, link)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="btn-secondary !px-2 !py-1 text-xs"
+                              title="Send feedback request via WhatsApp"
+                            >
+                              <MessageCircle size={12} /> WhatsApp
+                            </a>
+                          ) : (
+                            <span
+                              className="btn-secondary !px-2 !py-1 text-xs cursor-not-allowed opacity-50"
+                              title="Set VITE_CUSTOMER_SITE_URL to enable sending — no domain configured yet"
+                            >
+                              <MessageCircle size={12} /> WhatsApp
+                            </span>
+                          );
+                        })()
+                      )}
+                      <button
+                        className="btn-ghost !px-2 !py-1 text-xs"
+                        onClick={() => copyLink(r)}
+                        title={CUSTOMER_SITE_URL ? "Copy the full feedback link" : "No domain configured — copies just the feedback path"}
+                      >
+                        {copiedId === r.id ? <Check size={12} /> : <Copy size={12} />}
+                        {copiedId === r.id ? "Copied!" : CUSTOMER_SITE_URL ? "Copy link" : "Copy path"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

@@ -3,23 +3,33 @@ import { formatDateTime } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Star, Check, X, Heart } from "lucide-react";
+import { Star, Heart } from "lucide-react";
 
-type ReviewStatus = "pending" | "approved" | "rejected";
+// NOTE: the live `reviews` table (written by the public website's
+// ReviewForm) only has customer_name, rating, review_text, source,
+// is_featured and created_at — there is no `status`/`phone`/`comment`
+// column. This page used to assume a pending/approved/rejected `status`
+// field that never existed here, which crashed the whole page (reading
+// `.toLowerCase()` off `undefined`). Moderation is modeled the way the
+// real schema supports it: a review is either "Pending" (is_featured =
+// false, not yet shown on the site) or "Featured" (is_featured = true,
+// shows in the site's Customer Stories section) — see ReviewForm.tsx's
+// insert comment on the public website.
 interface Review {
   id: string;
   customer_name: string;
-  phone: string | null;
   rating: number;
-  comment: string | null;
-  status: ReviewStatus;
-  is_featured?: boolean;
+  review_text: string | null;
+  source: string | null;
+  is_featured: boolean;
   created_at: string;
 }
 
+type Filter = "all" | "pending" | "featured";
+
 export function Reviews() {
   const [reviews, setReviews] = useState<Review[]>([]);
-  const [statusFilter, setStatusFilter] = useState<"all" | ReviewStatus>("all");
+  const [filter, setFilter] = useState<Filter>("all");
 
   useEffect(() => {
     load();
@@ -37,17 +47,14 @@ export function Reviews() {
     setReviews((data as Review[]) ?? []);
   }
 
-  async function setStatus(id: string, status: ReviewStatus) {
-    await supabase.from("reviews").update({ status }).eq("id", id);
-  }
-
   async function toggleFeatured(r: Review) {
     await supabase.from("reviews").update({ is_featured: !r.is_featured }).eq("id", r.id);
     load();
   }
 
-  const filtered = statusFilter === "all" ? reviews : reviews.filter((r) => r.status === statusFilter);
-  const pendingCount = reviews.filter((r) => r.status === "pending").length;
+  const filtered =
+    filter === "all" ? reviews : reviews.filter((r) => (filter === "featured" ? r.is_featured : !r.is_featured));
+  const pendingCount = reviews.filter((r) => !r.is_featured).length;
 
   return (
     <div className="space-y-4">
@@ -58,29 +65,29 @@ export function Reviews() {
         <ExportExcelButton
           rows={filtered.map((r) => ({
             Name: r.customer_name,
-            Phone: r.phone,
             Rating: r.rating,
-            Comment: r.comment,
-            Status: r.status,
+            Review: r.review_text,
+            Source: r.source,
+            Featured: r.is_featured ? "Yes" : "No",
             Submitted: r.created_at,
           }))}
           fileName="reviews"
         />
       </div>
       <p className="text-sm text-gray-500">
-        Submitted from the public website. Approved reviews show up in the site's Customer Stories section.
+        Submitted from the public website. Featured reviews show up in the site's Customer Stories section.
       </p>
 
       <div className="flex gap-2">
-        {(["all", "pending", "approved", "rejected"] as const).map((s) => (
+        {(["all", "pending", "featured"] as const).map((f) => (
           <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
+            key={f}
+            onClick={() => setFilter(f)}
             className={`rounded-full px-3 py-1 text-sm capitalize ${
-              statusFilter === s ? "bg-brand-primary text-white" : "bg-gray-100 text-gray-600"
+              filter === f ? "bg-brand-primary text-white" : "bg-gray-100 text-gray-600"
             }`}
           >
-            {s}
+            {f}
           </button>
         ))}
       </div>
@@ -90,34 +97,23 @@ export function Reviews() {
           <div key={r.id} className="card p-4">
             <div className="flex items-center justify-between">
               <span className="font-medium text-gray-800">{r.customer_name}</span>
-              <StatusPill status={r.status} />
+              <StatusPill status={r.is_featured ? "active" : "pending"} label={r.is_featured ? "Featured" : "Pending"} />
             </div>
             <div className="mt-1 flex items-center gap-0.5">
               {Array.from({ length: 5 }).map((_, i) => (
                 <Star key={i} size={14} className={i < r.rating ? "fill-amber-400 text-amber-400" : "text-gray-300"} />
               ))}
             </div>
-            {r.comment && <p className="mt-2 text-sm text-gray-600">{r.comment}</p>}
+            {r.review_text && <p className="mt-2 text-sm text-gray-600">{r.review_text}</p>}
             <p className="mt-2 text-xs text-gray-400">{formatDateTime(r.created_at)}</p>
             <div className="mt-3 flex gap-2">
-              {r.status === "pending" ? (
-                <>
-                  <button className="btn-primary flex-1 !py-1.5 text-xs" onClick={() => setStatus(r.id, "approved")}>
-                    <Check size={13} /> Approve
-                  </button>
-                  <button className="btn-secondary flex-1 !py-1.5 text-xs" onClick={() => setStatus(r.id, "rejected")}>
-                    <X size={13} /> Reject
-                  </button>
-                </>
-              ) : (
-                <button
-                  className={`btn-secondary flex-1 !py-1.5 text-xs ${r.is_featured ? "text-brand-danger" : ""}`}
-                  onClick={() => toggleFeatured(r)}
-                >
-                  <Heart size={13} className={r.is_featured ? "fill-current" : ""} />
-                  {r.is_featured ? "Unfeature" : "Feature on site"}
-                </button>
-              )}
+              <button
+                className={`btn-secondary flex-1 !py-1.5 text-xs ${r.is_featured ? "text-brand-danger" : ""}`}
+                onClick={() => toggleFeatured(r)}
+              >
+                <Heart size={13} className={r.is_featured ? "fill-current" : ""} />
+                {r.is_featured ? "Unfeature" : "Feature on site"}
+              </button>
             </div>
           </div>
         ))}

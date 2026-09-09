@@ -97,6 +97,10 @@ export function Dashboard() {
   const [targetDrafts, setTargetDrafts] = useState<Record<string, string>>({});
   const [savingTarget, setSavingTarget] = useState<string | null>(null);
   const [deadStockDays, setDeadStockDays] = useState(60);
+  // Only the very first load shows a skeleton — realtime-triggered reloads
+  // after that happen quietly so the page doesn't re-flash every time any
+  // shopper anywhere places an order.
+  const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
     load();
@@ -159,6 +163,7 @@ export function Dashboard() {
     const targetMap: Record<string, number> = { daily: 0, weekly: 0, monthly: 0 };
     for (const t of (targetRows as SalesTarget[]) ?? []) targetMap[t.period] = Number(t.target_amount) || 0;
     setTargets(targetMap);
+    setInitialLoading(false);
   }
 
   const staffById = useMemo(() => {
@@ -325,18 +330,31 @@ export function Dashboard() {
     setSavingTarget(null);
   }
 
+  // Per-stat accent — each KPI gets its own hue (the theme already defines
+  // these as brand.revenue/profit/stock/repair; they just weren't wired up
+  // to anything yet) instead of every card reading as the same flat white
+  // tile with a gray-on-gray icon.
   const cards = [
-    { label: "Total Revenue", value: formatCurrency(totalRevenue), icon: IndianRupee, iconColor: "text-gold" },
-    { label: "Gross Profit", value: formatCurrency(grossProfit), icon: TrendingUp, iconColor: "text-brand-success" },
-    { label: "Invoice Count", value: invoiceCount.toString(), icon: Receipt, iconColor: "text-brand-primary", to: "/sales" },
-    { label: "Live Stock Value", value: formatCurrency(liveStockValue), icon: Boxes, iconColor: "text-gold", to: "/inventory" },
+    { label: "Total Revenue", value: formatCurrency(totalRevenue), icon: IndianRupee, accent: "revenue" as const, bar: "from-[#C9975A] to-[#E3B87D]" },
+    { label: "Gross Profit", value: formatCurrency(grossProfit), icon: TrendingUp, accent: "success" as const, bar: "from-brand-success to-emerald-400" },
+    { label: "Invoice Count", value: invoiceCount.toString(), icon: Receipt, accent: "primary" as const, to: "/sales", bar: "from-brand-primary to-blue-400" },
+    { label: "Live Stock Value", value: formatCurrency(liveStockValue), icon: Boxes, accent: "stock" as const, to: "/inventory", bar: "from-[#1F3A8A] to-[#4F6BC7]" },
   ];
 
   const secondaryCards = [
-    { label: "Pending Repair Enquiries", value: pendingRepairEnquiries.toString(), icon: Wrench, iconColor: "text-gold", to: "/repair-enquiries" },
-    { label: "Pending Website Orders", value: pendingWebsiteOrders.toString(), icon: ShoppingBag, iconColor: "text-brand-primary", to: "/web-orders" },
-    { label: "Low Stock Products", value: lowStock.length.toString(), icon: Package, iconColor: "text-brand-danger", to: "/inventory" },
+    { label: "Pending Repair Enquiries", value: pendingRepairEnquiries.toString(), icon: Wrench, accent: "repair" as const, to: "/repair-enquiries" },
+    { label: "Pending Website Orders", value: pendingWebsiteOrders.toString(), icon: ShoppingBag, accent: "primary" as const, to: "/web-orders" },
+    { label: "Low Stock Products", value: lowStock.length.toString(), icon: Package, accent: "danger" as const, to: "/inventory" },
   ];
+
+  const ACCENT_CLASSES: Record<string, { chip: string; icon: string }> = {
+    revenue: { chip: "bg-[#C9975A]/12", icon: "text-[#C9975A]" },
+    success: { chip: "bg-brand-success/12", icon: "text-brand-success" },
+    primary: { chip: "bg-brand-primary/12", icon: "text-brand-primary" },
+    stock: { chip: "bg-[#1F3A8A]/12", icon: "text-[#1F3A8A]" },
+    repair: { chip: "bg-[#C9975A]/12", icon: "text-[#C9975A]" },
+    danger: { chip: "bg-brand-danger/12", icon: "text-brand-danger" },
+  };
 
   const PERIODS: { key: Period; label: string }[] = [
     { key: "day", label: "Day" },
@@ -365,27 +383,41 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
-        {cards.map((c) => {
-          const Card = (
-            <div className="card relative overflow-hidden p-4 pl-5 transition-shadow hover:shadow-cardHover">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="text-xs font-medium text-gray-500">{c.label}</div>
-                  <div className="mt-1 font-serif text-2xl font-semibold text-gray-800">{c.value}</div>
-                </div>
-                <div className={`flex h-9 w-9 items-center justify-center rounded-lg border border-border ${c.iconColor}`}>
-                  <c.icon size={17} strokeWidth={1.75} />
-                </div>
+        {initialLoading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="card relative overflow-hidden p-4 pl-5">
+                <div className="h-3 w-20 animate-pulse rounded bg-accent" />
+                <div className="mt-2.5 h-6 w-24 animate-pulse rounded bg-accent" />
               </div>
-            </div>
-          );
-          return c.to ? <Link key={c.label} to={c.to}>{Card}</Link> : <div key={c.label}>{Card}</div>;
-        })}
+            ))
+          : cards.map((c) => {
+              const a = ACCENT_CLASSES[c.accent];
+              const Card = (
+                <div className="card relative overflow-hidden p-4 pl-5 transition-shadow hover:shadow-cardHover">
+                  <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${c.bar}`} />
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="text-xs font-medium text-gray-500">{c.label}</div>
+                      <div className="mt-1 font-serif text-2xl font-semibold text-gray-800">{c.value}</div>
+                    </div>
+                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${a.chip} ${a.icon}`}>
+                      <c.icon size={17} strokeWidth={1.75} />
+                    </div>
+                  </div>
+                </div>
+              );
+              return c.to ? <Link key={c.label} to={c.to}>{Card}</Link> : <div key={c.label}>{Card}</div>;
+            })}
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="card p-4">
-          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Payment Mode Split</div>
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-primary/12 text-brand-primary">
+              <IndianRupee size={13} strokeWidth={2} />
+            </span>
+            Payment Mode Split
+          </div>
           <ul className="space-y-2">
             {(Object.entries(paymentSplit.byMode) as [string, number][])
               .filter(([mode]) => mode !== "Other" || paymentSplit.byMode.Other > 0)
@@ -399,7 +431,12 @@ export function Dashboard() {
         </div>
 
         <div className="card p-4">
-          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Top Selling Products</div>
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[#C9975A]/12 text-[#C9975A]">
+              <Trophy size={13} strokeWidth={2} />
+            </span>
+            Top Selling Products
+          </div>
           <table className="table-base">
             <thead>
               <tr>
@@ -426,7 +463,12 @@ export function Dashboard() {
         </div>
 
         <div className="card p-4">
-          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Inventory Health</div>
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-success/12 text-brand-success">
+              <Boxes size={13} strokeWidth={2} />
+            </span>
+            Inventory Health
+          </div>
           <div className="mb-3 flex items-center justify-between text-sm">
             <span className="text-gray-600">Live stock value</span>
             <span className="font-medium text-gray-800">{formatCurrency(liveStockValue)}</span>
@@ -455,7 +497,9 @@ export function Dashboard() {
       <div className="card p-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
-            <AlertTriangle size={15} className="text-amber-500" />
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-500/12 text-amber-500">
+              <AlertTriangle size={13} strokeWidth={2} />
+            </span>
             Dead Stock Monitoring
           </div>
           <div className="flex rounded-lg border border-border bg-page p-0.5">
@@ -512,22 +556,34 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card p-4">
           <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
-            <Wrench size={15} className="text-brand-primary" />
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-primary/12 text-brand-primary">
+              <Wrench size={13} strokeWidth={2} />
+            </span>
             Job Card Funnel
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {OPEN_REPAIR_STATUSES.map((s) => (
-              <div key={s} className="rounded-lg border border-border p-2.5 text-center">
-                <div className="font-serif text-xl font-semibold text-gray-800">{repairFunnel[s] ?? 0}</div>
-                <div className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-500">{REPAIR_STATUS_LABEL[s]}</div>
-              </div>
-            ))}
+            {OPEN_REPAIR_STATUSES.map((s) => {
+              const tone: Record<string, string> = {
+                received: "bg-brand-primary/8",
+                in_progress: "bg-[#C9975A]/10",
+                waiting_parts: "bg-amber-500/10",
+                ready: "bg-brand-success/10",
+              };
+              return (
+                <div key={s} className={`rounded-lg p-2.5 text-center ${tone[s] ?? "bg-accent"}`}>
+                  <div className="font-serif text-xl font-semibold text-gray-800">{repairFunnel[s] ?? 0}</div>
+                  <div className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-500">{REPAIR_STATUS_LABEL[s]}</div>
+                </div>
+              );
+            })}
           </div>
         </div>
 
         <div className="card p-4">
           <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
-            <Wrench size={15} className="text-gold" />
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gold/12 text-gold">
+              <Wrench size={13} strokeWidth={2} />
+            </span>
             Technician Efficiency
           </div>
           <table className="table-base">
@@ -560,7 +616,9 @@ export function Dashboard() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="card p-4">
           <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
-            <Trophy size={15} className="text-gold" />
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-gold/12 text-gold">
+              <Trophy size={13} strokeWidth={2} />
+            </span>
             Salesman Leaderboard — Today
           </div>
           <ul className="space-y-2">
@@ -581,7 +639,9 @@ export function Dashboard() {
 
         <div className="card p-4">
           <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
-            <Target size={15} className="text-brand-primary" />
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-primary/12 text-brand-primary">
+              <Target size={13} strokeWidth={2} />
+            </span>
             Target Progress
           </div>
           <div className="space-y-3">
@@ -627,7 +687,12 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="card p-4 lg:col-span-3">
-          <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Recent Website Orders</div>
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-primary/12 text-brand-primary">
+              <ShoppingBag size={13} strokeWidth={2} />
+            </span>
+            Recent Website Orders
+          </div>
           <div className="overflow-x-auto">
             <table className="table-base min-w-[560px]">
               <thead>
@@ -661,15 +726,18 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        {secondaryCards.map((c) => (
-          <Link key={c.label} to={c.to} className="card flex items-center justify-between p-3 transition-shadow hover:shadow-cardHover">
-            <span className="text-sm text-gray-600">{c.label}</span>
-            <span className="flex items-center gap-2 font-serif text-lg font-semibold text-gray-800">
-              {c.value}
-              <c.icon size={16} className={c.iconColor} />
-            </span>
-          </Link>
-        ))}
+        {secondaryCards.map((c) => {
+          const a = ACCENT_CLASSES[c.accent];
+          return (
+            <Link key={c.label} to={c.to} className="card flex items-center gap-3 p-3 transition-shadow hover:shadow-cardHover">
+              <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${a.chip} ${a.icon}`}>
+                <c.icon size={16} strokeWidth={1.75} />
+              </div>
+              <span className="flex-1 text-sm text-gray-600">{c.label}</span>
+              <span className="font-serif text-lg font-semibold text-gray-800">{c.value}</span>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );

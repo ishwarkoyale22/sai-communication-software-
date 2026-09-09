@@ -1,9 +1,25 @@
 import { useEffect, useState } from "react";
+import jsPDF from "jspdf";
+import * as autoTableModule from "jspdf-autotable";
 import { formatDate, formatCurrency } from "@sai/shared";
-import { supabase } from "../lib/supabase";
+import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Download } from "lucide-react";
+
+// jspdf-autotable's default export needs this same defensive two-level
+// unwrap as packages/shared/src/simpleInvoice.ts (see the comment there) —
+// Vite/rolldown's CJS interop otherwise hands back the whole module object
+// instead of the callable function, and calling it throws "is not a
+// function".
+const autoTableExports = autoTableModule as any;
+const autoTable = (
+  typeof autoTableExports === "function"
+    ? autoTableExports
+    : typeof autoTableExports.default === "function"
+      ? autoTableExports.default
+      : autoTableExports.default?.default
+) as (doc: jsPDF, options: any) => void;
 
 interface WholesalerInvoice {
   id: string;
@@ -79,6 +95,51 @@ export function WholesalerInvoices() {
     load();
   }
 
+  // No file is ever uploaded for these (no storage bucket, no file_url
+  // column on the live table — recording a wholesaler invoice here is just
+  // manual data entry). This generates a downloadable PDF record from that
+  // data on demand instead, the same way Sales.tsx's "Download" button
+  // builds a PDF from sale data rather than an uploaded file.
+  function downloadInvoicePdf(inv: WholesalerInvoice) {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text(SHOP.name, 14, 18);
+    doc.setFontSize(10);
+    doc.text(SHOP.address, 14, 24);
+    doc.text(`Phone: ${SHOP.phone}`, 14, 29);
+
+    doc.setFontSize(14);
+    doc.text("PURCHASE RECORD", 140, 18);
+    doc.setFontSize(10);
+    doc.text(`Invoice #: ${inv.invoice_number ?? "-"}`, 140, 24);
+    doc.text(`Date: ${formatDate(inv.invoice_date)}`, 140, 29);
+
+    doc.text("Supplier:", 14, 40);
+    doc.text(inv.wholesaler_name, 14, 45);
+
+    autoTable(doc, {
+      startY: 55,
+      head: [["", "Amount"]],
+      body: [
+        ["Total Amount", formatCurrency(inv.total_amount)],
+        ["Paid Amount", formatCurrency(inv.paid_amount)],
+        ["Due Amount", formatCurrency(inv.due_amount ?? 0)],
+        ["Status", inv.payment_status],
+        ...(inv.due_date ? [["Due Date", formatDate(inv.due_date)]] : []),
+      ],
+    });
+
+    if (inv.notes) {
+      // @ts-expect-error lastAutoTable is added by jspdf-autotable at runtime
+      const y = (doc.lastAutoTable?.finalY ?? 55) + 10;
+      doc.setFontSize(10);
+      doc.text("Notes:", 14, y);
+      doc.text(doc.splitTextToSize(inv.notes, 180), 14, y + 5);
+    }
+
+    doc.save(`${inv.invoice_number || inv.wholesaler_name}.pdf`);
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -113,6 +174,7 @@ export function WholesalerInvoices() {
               <th className="text-right">Due</th>
               <th>Status</th>
               <th>Date</th>
+              <th className="text-right">Invoice</th>
             </tr>
           </thead>
           <tbody>
@@ -127,11 +189,20 @@ export function WholesalerInvoices() {
                   <StatusPill status={i.payment_status} />
                 </td>
                 <td className="text-gray-500">{formatDate(i.invoice_date)}</td>
+                <td className="text-right">
+                  <button
+                    className="btn-ghost !px-2 !py-1 text-xs"
+                    onClick={() => downloadInvoicePdf(i)}
+                    title="Download a PDF record of this invoice"
+                  >
+                    <Download size={13} /> Download
+                  </button>
+                </td>
               </tr>
             ))}
             {invoices.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-gray-400">No invoices recorded yet.</td>
+                <td colSpan={8} className="py-8 text-center text-gray-400">No invoices recorded yet.</td>
               </tr>
             )}
           </tbody>

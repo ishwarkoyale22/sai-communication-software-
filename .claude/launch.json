@@ -7,6 +7,14 @@
       "runtimeArgs": ["run", "dev:admin"],
       "port": 5173,
       "autoPort": true
+    },
+    {
+      "name": "customer-web",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "C:\\Users\\ishwa\\Downloads\\Sai-Communication-main (2)\\Sai-Communication-main",
+      "port": 3000,
+      "autoPort": true
     }
   ]
 }
