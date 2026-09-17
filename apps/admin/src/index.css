@@ -4,7 +4,7 @@
 
 @layer base {
   html {
-    font-size: 14px;
+    font-size: 16px;
   }
   body {
     @apply bg-page text-gray-900 antialiased;
@@ -51,19 +51,75 @@
 
 @layer components {
   .card {
-    @apply rounded-card border border-border bg-card shadow-card;
+    @apply rounded-card border border-border shadow-card;
+    background: linear-gradient(180deg, #ffffff, #fdfbf8);
+  }
+  /* Cream Luxe accent variants — the same glossy gold/blue tints from the
+     dashboard concept, applied to the right-hand cards in each dashboard
+     row so the palette reads consistently without recoloring every card. */
+  .card-gold {
+    @apply rounded-card border shadow-card;
+    background: linear-gradient(160deg, #fdf3e4, #f6e4c7);
+    border-color: #ead9b8;
+  }
+  .card-blue {
+    @apply rounded-card border shadow-card;
+    background: linear-gradient(160deg, #eaf0fb, #dce6f7);
+    border-color: #c9d9f2;
+  }
+  .card-green {
+    @apply rounded-card border shadow-card;
+    background: linear-gradient(160deg, #eaf7f0, #d8f0e2);
+    border-color: #bfe4cf;
+  }
+  .card-red {
+    @apply rounded-card border shadow-card;
+    background: linear-gradient(160deg, #fceeed, #f8d9d6);
+    border-color: #f0c1bd;
+  }
+  .card-amber {
+    @apply rounded-card border shadow-card;
+    background: linear-gradient(160deg, #fdf2e2, #f9e2bd);
+    border-color: #edd19c;
+  }
+  .card-purple {
+    @apply rounded-card border shadow-card;
+    background: linear-gradient(160deg, #f2eefb, #e3d9f5);
+    border-color: #d3c1ea;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
+    @apply relative inline-flex items-center justify-center gap-1.5 overflow-hidden rounded-md px-3 py-1.5 text-sm font-medium transition-all duration-150 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  /* Glossy convex buttons — a bright top-half sheen over a deeper gradient
+     base, plus a soft colored shadow underneath, so every primary action
+     reads as a raised, polished button rather than a flat rectangle. */
+  .btn::before {
+    content: "";
+    @apply pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-md bg-gradient-to-b from-white/35 to-transparent;
+  }
+  .btn:active {
+    transform: scale(0.97);
   }
   .btn-primary {
-    @apply btn bg-brand-primary text-white hover:opacity-90 shadow-sm;
+    @apply btn text-white;
+    background: linear-gradient(180deg, #2a4bb0, #1f3a8a 55%, #16296b);
+    box-shadow: 0 8px 18px -6px rgba(31, 58, 138, 0.55);
+  }
+  .btn-primary:hover {
+    filter: brightness(1.08);
   }
   .btn-secondary {
-    @apply btn border border-gray-300 text-gray-700 bg-white hover:bg-gray-50;
+    @apply btn border text-gray-700;
+    background: linear-gradient(180deg, #ffffff, #f3ede1);
+    border-color: #e5ddc9;
+    box-shadow: 0 4px 10px -6px rgba(27, 27, 27, 0.25);
+  }
+  .btn-secondary:hover {
+    filter: brightness(0.98);
   }
   .btn-ghost {
-    @apply btn text-gray-600 hover:bg-gray-100;
+    @apply text-gray-600 hover:bg-gray-100;
+    @apply inline-flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none;
   }
   .pill {
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
@@ -93,7 +149,16 @@
   .card:has(.table-base) {
     overflow-x: auto;
   }
-  .table-base thead th {
+  /* :where(...) keeps this selector's specificity at zero, so a page's own
+     text-right/text-center utility class on a <th> always wins — without
+     it, this rule's compound selector (.table-base thead th) outranks a
+     plain single-class utility, silently forcing every header back to
+     left-aligned even when the column's data is right-aligned. This was
+     the root cause of headers visually not lining up with their column's
+     values across every page using .table-base (Sales, Inventory,
+     Payments, Dashboard, and others) — fixed once here instead of patching
+     each page's <th> with an ad-hoc !important override. */
+  :where(.table-base thead th) {
     @apply sticky top-0 z-10 bg-accent text-left text-xs font-semibold uppercase tracking-wide text-gray-500 px-3 py-2 border-b border-border;
   }
   .table-base tbody td {

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { StatusPill } from "../components/StatusPill";
 import { Plus, Trash2 } from "lucide-react";
@@ -48,8 +49,8 @@ export function ServiceManagement() {
   }
 
   async function remove(id: string) {
-    if (!confirm("Delete this service? This only removes it from the website — it doesn't affect past sales.")) return;
-    await supabase.from("services").delete().eq("id", id);
+    if (!confirm("Delete this service? This only removes it from the website — it doesn't affect past sales. You can restore it from the Recycle Bin afterwards.")) return;
+    await softDelete(supabase, "services", id);
     load();
   }
 

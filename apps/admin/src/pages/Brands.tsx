@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
@@ -83,8 +84,8 @@ export function Brands() {
   }
 
   async function removeBrand(b: Brand) {
-    if (!confirm(`Delete brand "${b.name}"?`)) return;
-    const { error: delErr } = await supabase.from("brands").delete().eq("id", b.id);
+    if (!confirm(`Delete brand "${b.name}"? You can restore it from the Recycle Bin afterwards.`)) return;
+    const { error: delErr } = await softDelete(supabase, "brands", b.id, b.name);
     if (delErr) {
       // Likely referenced by inventory items — deactivate instead.
       await supabase.from("brands").update({ is_active: false }).eq("id", b.id);

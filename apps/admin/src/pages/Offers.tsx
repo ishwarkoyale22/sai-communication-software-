@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
@@ -26,6 +27,13 @@ const OFFER_TYPE_LABEL: Record<OfferType, string> = {
   bogo: "Buy 1 Get 1",
   rupee_off: "Rupee Off",
   coupon: "Coupon Code",
+};
+
+const OFFER_TYPE_TILE: Record<OfferType, string> = {
+  percentage: "card-gold",
+  bogo: "card-purple",
+  rupee_off: "card-green",
+  coupon: "card-blue",
 };
 
 const emptyForm = {
@@ -111,8 +119,8 @@ export function Offers() {
   }
 
   async function removeOffer(o: Offer) {
-    if (!confirm(`Delete offer "${o.title}"?`)) return;
-    await supabase.from("offers").delete().eq("id", o.id);
+    if (!confirm(`Delete offer "${o.title}"? You can restore it from the Recycle Bin afterwards.`)) return;
+    await softDelete(supabase, "offers", o.id, o.title);
     load();
   }
 
@@ -146,7 +154,10 @@ export function Offers() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {offers.map((o) => (
-          <div key={o.id} className={`card p-4 ${!o.is_active ? "opacity-50" : ""}`}>
+          <div
+            key={o.id}
+            className={`${o.offer_type ? OFFER_TYPE_TILE[o.offer_type] : "card"} p-4 ${!o.is_active ? "opacity-50" : ""}`}
+          >
             <div className="flex items-start justify-between">
               <div className="font-medium text-gray-800">{o.title}</div>
               <StatusPill status={isLive(o) ? "active" : "neutral"} label={isLive(o) ? "Live" : "Not live"} />

@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, X, Edit2, Trash2, Check, AlertCircle, Upload, Loader2, Printer } from "lucide-react";
-import { formatCurrency } from "@sai/shared";
+import { Plus, X, Edit2, Trash2, Check, AlertCircle, Upload, Loader2, Printer, Hash, Camera, FileSpreadsheet, Keyboard } from "lucide-react";
+import { formatCurrency, validateImei, normalizeImei, softDelete } from "@sai/shared";
+import type { InventoryUnit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
+import * as XLSX from "xlsx";
+import { Html5Qrcode } from "html5-qrcode";
 
 const IMAGE_BUCKET = "product-images";
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
@@ -54,6 +57,7 @@ interface InventoryItem {
   is_featured: boolean;
   is_active: boolean;
   cost_price: number | null;
+  is_serialized: boolean;
 }
 
 // Must exactly match the live `inventory_category_check` constraint —
@@ -77,6 +81,8 @@ const emptyForm = {
   is_featured: false,
   image_url: "",
   cost_price: 0,
+  is_serialized: false,
+  serials: "",
 };
 
 type SortKey = "name" | "price_desc" | "stock_asc" | "stock_desc" | "category";
@@ -105,6 +111,37 @@ export function Inventory() {
   const [uploading, setUploading] = useState(false);
   const [localPreview, setLocalPreview] = useState<string | null>(null); // instant preview before upload finishes
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // "Manage Serials" modal — add/view per-unit IMEI/serial numbers for a
+  // product, and (if not already serialized) turn serial tracking on.
+  // Supports all three intake methods from the spec: Manual Entry (Method C),
+  // Excel/CSV Import (Method B), and camera Scan (Method A).
+  const [serialsModalFor, setSerialsModalFor] = useState<InventoryItem | null>(null);
+  const [serialsModalUnits, setSerialsModalUnits] = useState<InventoryUnit[]>([]);
+  const [serialsModalLoading, setSerialsModalLoading] = useState(false);
+  const [serialsModalError, setSerialsModalError] = useState<string | null>(null);
+  const [serialsMethod, setSerialsMethod] = useState<"manual" | "excel" | "scan">("manual");
+  const [expectedQty, setExpectedQty] = useState<number | "">("");
+  // Manual entry — one row per physical stock unit (IMEI 1, IMEI 2, Serial).
+  const [manualRows, setManualRows] = useState<{ imei_1: string; imei_2: string; serial_no: string }[]>([
+    { imei_1: "", imei_2: "", serial_no: "" },
+  ]);
+  // Excel import — parsed + validated rows awaiting user confirmation.
+  const [excelPreview, setExcelPreview] = useState<
+    | null
+    | {
+        rows: { row: number; imei_1: string; imei_2: string; serial_no: string; errors: string[] }[];
+        valid: number;
+        invalid: number;
+        duplicate: number;
+      }
+  >(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
+  // Scan mode — live camera decode.
+  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const [scanActive, setScanActive] = useState(false);
+  const [scanFeedback, setScanFeedback] = useState<string | null>(null);
+  const [scannedPending, setScannedPending] = useState<{ imei_1: string; imei_2: string; serial_no: string }[]>([]);
 
   async function handleImageFile(file: File | undefined) {
     if (!file) return;
@@ -162,6 +199,293 @@ export function Inventory() {
     return brands.find((b) => b.id === id)?.name ?? "-";
   }
 
+  // Splits a textarea of plain serials (one per line, or comma-separated).
+  // Used only for the Add-Product form's initial stock entry, where dual
+  // IMEI isn't collected inline — the Manage Serials modal has richer input.
+  function parseSerials(text: string): string[] {
+    const seen = new Set<string>();
+    for (const raw of text.split(/[\n,]/)) {
+      const s = raw.trim();
+      if (s) seen.add(s);
+    }
+    return Array.from(seen);
+  }
+
+  async function openSerialsModal(item: InventoryItem) {
+    setSerialsModalError(null);
+    setSerialsMethod("manual");
+    setExpectedQty("");
+    setManualRows([{ imei_1: "", imei_2: "", serial_no: "" }]);
+    setExcelPreview(null);
+    setScannedPending([]);
+    setScanFeedback(null);
+    await stopScanner();
+    setSerialsModalFor(item);
+    setSerialsModalLoading(true);
+    const { data } = await supabase
+      .from("inventory_units")
+      .select("*")
+      .eq("inventory_id", item.id)
+      .order("created_at", { ascending: false });
+    setSerialsModalUnits((data as InventoryUnit[]) ?? []);
+    setSerialsModalLoading(false);
+  }
+
+  async function closeSerialsModal() {
+    await stopScanner();
+    setSerialsModalFor(null);
+  }
+
+  // Cross-column duplicate check against ALL existing units in this shop's
+  // inventory (not just the current product), so a phone imported earlier
+  // as a different product's stock still trips the "already exists" guard.
+  async function findExistingImeiOwner(imei: string): Promise<{ inventory_id: string; unit_id: string; imei_field: "imei_1" | "imei_2" } | null> {
+    const { data: as1 } = await supabase.from("inventory_units").select("id, inventory_id").eq("imei_1", imei).limit(1).maybeSingle();
+    if (as1) return { inventory_id: as1.inventory_id, unit_id: as1.id, imei_field: "imei_1" };
+    const { data: as2 } = await supabase.from("inventory_units").select("id, inventory_id").eq("imei_2", imei).limit(1).maybeSingle();
+    if (as2) return { inventory_id: as2.inventory_id, unit_id: as2.id, imei_field: "imei_2" };
+    return null;
+  }
+
+  // Validates one row for the current draft (Manual/Scan/Excel). Errors
+  // include Luhn/format issues (skipped when the field is blank because
+  // serial-only is valid), duplicates within the current draft, and
+  // duplicates against any existing unit anywhere in inventory.
+  async function validateDraftRow(
+    row: { imei_1: string; imei_2: string; serial_no: string },
+    seenInDraft: Set<string>
+  ): Promise<string[]> {
+    const errors: string[] = [];
+    const imei1 = normalizeImei(row.imei_1);
+    const imei2 = normalizeImei(row.imei_2);
+    const serial = row.serial_no.trim();
+
+    if (!imei1 && !imei2 && !serial) {
+      errors.push("Enter IMEI 1, IMEI 2 or Serial No.");
+      return errors;
+    }
+
+    if (imei1 && imei2 && imei1 === imei2) errors.push("IMEI 1 and IMEI 2 cannot be the same.");
+
+    for (const [label, value] of [["IMEI 1", row.imei_1], ["IMEI 2", row.imei_2]] as const) {
+      if (!value.trim()) continue;
+      const res = validateImei(value);
+      if (!res.ok) errors.push(`${label}: ${res.message}`);
+    }
+
+    for (const val of [imei1, imei2].filter(Boolean)) {
+      if (seenInDraft.has(val)) errors.push(`Duplicate IMEI ${val} in this draft.`);
+      else seenInDraft.add(val);
+    }
+
+    for (const val of [imei1, imei2].filter(Boolean)) {
+      const owner = await findExistingImeiOwner(val);
+      if (owner) errors.push(`IMEI ${val} already exists.`);
+    }
+
+    return errors;
+  }
+
+  // Turns the Manual Entry rows (or scan/excel-produced rows) into actual
+  // inventory_units + imei_history rows. Runs full pre-flight validation so
+  // partial writes never happen — the transactionality here is "validate
+  // everything first, then insert everything, then bail on any error".
+  async function commitDraftRows(rows: { imei_1: string; imei_2: string; serial_no: string }[]) {
+    if (!serialsModalFor) return;
+    setSerialsModalError(null);
+    if (rows.length === 0) {
+      setSerialsModalError("Nothing to add.");
+      return;
+    }
+
+    setSerialsModalLoading(true);
+    try {
+      const seen = new Set<string>();
+      const preflight: { row: number; errors: string[] }[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const errs = await validateDraftRow(rows[i], seen);
+        if (errs.length) preflight.push({ row: i + 1, errors: errs });
+      }
+      if (preflight.length) {
+        setSerialsModalError(
+          preflight.slice(0, 3).map((p) => `Row ${p.row}: ${p.errors.join(" / ")}`).join("\n") +
+            (preflight.length > 3 ? `\n(+${preflight.length - 3} more errors — fix and retry)` : "")
+        );
+        return;
+      }
+
+      // Enable serial tracking on first use of this modal for a product.
+      if (!serialsModalFor.is_serialized) {
+        const { error: toggleErr } = await supabase
+          .from("inventory")
+          .update({ is_serialized: true })
+          .eq("id", serialsModalFor.id);
+        if (toggleErr) throw toggleErr;
+      }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const userId = session?.user?.id ?? null;
+
+      // Insert unit rows with client-generated ids so we can immediately
+      // write matching imei_history 'purchase' + 'in_stock' events without
+      // a second round-trip to look up the ids.
+      const toInsert = rows.map((r) => ({
+        id: crypto.randomUUID(),
+        inventory_id: serialsModalFor.id,
+        imei_1: normalizeImei(r.imei_1) || null,
+        imei_2: normalizeImei(r.imei_2) || null,
+        serial_no: r.serial_no.trim() || null,
+        status: "in_stock" as const,
+        created_by: userId,
+        updated_by: userId,
+      }));
+
+      const { error: unitsErr } = await supabase.from("inventory_units").insert(toInsert);
+      if (unitsErr) throw unitsErr;
+
+      // History: one 'purchase' event per unit, matching spec §8 lifecycle.
+      const historyRows = toInsert.map((u) => ({
+        stock_unit_id: u.id,
+        imei_1: u.imei_1,
+        imei_2: u.imei_2,
+        event_type: "purchase" as const,
+        to_status: "in_stock",
+        created_by: userId,
+      }));
+      const { error: histErr } = await supabase.from("imei_history").insert(historyRows);
+      if (histErr) throw histErr;
+
+      // Reset the draft for the next batch.
+      setManualRows([{ imei_1: "", imei_2: "", serial_no: "" }]);
+      setExcelPreview(null);
+      setScannedPending([]);
+      await openSerialsModal({ ...serialsModalFor, is_serialized: true });
+      await load();
+    } catch (err: any) {
+      setSerialsModalError(err?.message || "Failed to save — a serial may already be in use.");
+    } finally {
+      setSerialsModalLoading(false);
+    }
+  }
+
+  async function deleteUnit(unit: InventoryUnit) {
+    const label = unit.imei_1 ?? unit.imei_2 ?? unit.serial_no ?? unit.id;
+    if (!confirm(`Remove ${label} from stock? Only do this if it was entered by mistake.`)) return;
+    await supabase.from("inventory_units").delete().eq("id", unit.id);
+    if (serialsModalFor) await openSerialsModal(serialsModalFor);
+    await load();
+  }
+
+  // ── Excel/CSV Import (Method B) ────────────────────────────────────────
+  async function handleExcelFile(file: File | undefined) {
+    if (!file || !serialsModalFor) return;
+    setSerialsModalError(null);
+    setSerialsModalLoading(true);
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const raw: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      // Skip header row if it looks like one (first cell contains "IMEI" or "Serial").
+      let dataRows = raw;
+      const first = raw[0]?.map((v) => String(v).toLowerCase()).join(" ") ?? "";
+      if (/imei|serial|sr/.test(first)) dataRows = raw.slice(1);
+
+      const seen = new Set<string>();
+      const rows: { row: number; imei_1: string; imei_2: string; serial_no: string; errors: string[] }[] = [];
+      let valid = 0;
+      let duplicate = 0;
+      let invalid = 0;
+      for (let i = 0; i < dataRows.length; i++) {
+        const cols = dataRows[i];
+        const imei_1 = String(cols[0] ?? "").trim();
+        const imei_2 = String(cols[1] ?? "").trim();
+        const serial_no = String(cols[2] ?? "").trim();
+        if (!imei_1 && !imei_2 && !serial_no) continue; // blank row → skip
+        const errs = await validateDraftRow({ imei_1, imei_2, serial_no }, seen);
+        if (errs.length === 0) valid++;
+        else if (errs.some((e) => /already exists|Duplicate/.test(e))) duplicate++;
+        else invalid++;
+        rows.push({ row: i + 1 + (first ? 1 : 0), imei_1, imei_2, serial_no, errors: errs });
+      }
+      setExcelPreview({ rows, valid, invalid, duplicate });
+    } catch (err: any) {
+      setSerialsModalError(err?.message || "Could not read that file — is it a valid .xlsx or .csv?");
+    } finally {
+      setSerialsModalLoading(false);
+      if (excelInputRef.current) excelInputRef.current.value = "";
+    }
+  }
+
+  async function commitExcelImport() {
+    if (!excelPreview) return;
+    const clean = excelPreview.rows.filter((r) => r.errors.length === 0);
+    await commitDraftRows(clean.map((r) => ({ imei_1: r.imei_1, imei_2: r.imei_2, serial_no: r.serial_no })));
+  }
+
+  // ── Camera Scan (Method A) ─────────────────────────────────────────────
+  async function startScanner() {
+    if (scanActive) return;
+    setScanFeedback(null);
+    setSerialsModalError(null);
+    try {
+      const scanner = new Html5Qrcode("imei-scanner-region");
+      scannerRef.current = scanner;
+      setScanActive(true);
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        (decoded) => onScanDecoded(decoded),
+        () => {
+          /* per-frame errors are noise, don't surface */
+        }
+      );
+    } catch (err: any) {
+      setScanActive(false);
+      setSerialsModalError(err?.message || "Could not start camera — permission may be denied.");
+    }
+  }
+
+  async function stopScanner() {
+    const scanner = scannerRef.current;
+    if (!scanner) return;
+    try {
+      await scanner.stop();
+      scanner.clear();
+    } catch {
+      /* already stopped */
+    }
+    scannerRef.current = null;
+    setScanActive(false);
+  }
+
+  async function onScanDecoded(text: string) {
+    const normalized = normalizeImei(text);
+    const res = validateImei(normalized);
+    if (!res.ok) {
+      setScanFeedback(res.message ?? "Invalid scan");
+      return;
+    }
+    // Reject if already in the pending list or existing stock.
+    if (scannedPending.some((r) => r.imei_1 === res.normalized || r.imei_2 === res.normalized)) {
+      setScanFeedback(`Already scanned in this batch: ${res.normalized}`);
+      return;
+    }
+    const owner = await findExistingImeiOwner(res.normalized);
+    if (owner) {
+      setScanFeedback(`IMEI ${res.normalized} already exists.`);
+      return;
+    }
+    setScannedPending((prev) => [...prev, { imei_1: res.normalized, imei_2: "", serial_no: "" }]);
+    setScanFeedback(`Added ${res.normalized}`);
+  }
+
+  async function commitScannedRows() {
+    await commitDraftRows(scannedPending);
+  }
+
   async function addItem() {
     if (!form.name.trim() || !form.model.trim()) {
       setError("Product name and model are required.");
@@ -180,26 +504,42 @@ export function Inventory() {
         return;
       }
 
-      const { error: insertErr } = await supabase.from("inventory").insert({
-        name: form.name.trim(),
-        model: form.model.trim(),
-        category: form.category,
-        brand_id: form.brand_id || null,
-        product_type: form.product_type,
-        price: Number(form.price) || 0,
-        original_price: Number(form.original_price) || null,
-        stock: Number(form.stock) || 0,
-        condition: form.product_type === "refurbished" ? form.condition || null : null,
-        grade: form.product_type === "refurbished" ? form.grade || null : null,
-        battery_health: form.product_type === "refurbished" ? Number(form.battery_health) || null : null,
-        warranty_months: Number(form.warranty_months) || 0,
-        is_featured: form.is_featured,
-        images: form.image_url.trim() ? [form.image_url.trim()] : [],
-        is_active: true,
-        cost_price: Number(form.cost_price) || null,
-      });
+      const serials = form.is_serialized ? parseSerials(form.serials) : [];
+
+      const { data: inserted, error: insertErr } = await supabase
+        .from("inventory")
+        .insert({
+          name: form.name.trim(),
+          model: form.model.trim(),
+          category: form.category,
+          brand_id: form.brand_id || null,
+          product_type: form.product_type,
+          price: Number(form.price) || 0,
+          original_price: Number(form.original_price) || null,
+          // Serialized items derive stock from inventory_units (via trigger)
+          // — 0 here is just the starting point until serials are inserted below.
+          stock: form.is_serialized ? 0 : Number(form.stock) || 0,
+          condition: form.product_type === "refurbished" ? form.condition || null : null,
+          grade: form.product_type === "refurbished" ? form.grade || null : null,
+          battery_health: form.product_type === "refurbished" ? Number(form.battery_health) || null : null,
+          warranty_months: Number(form.warranty_months) || 0,
+          is_featured: form.is_featured,
+          images: form.image_url.trim() ? [form.image_url.trim()] : [],
+          is_active: true,
+          cost_price: Number(form.cost_price) || null,
+          is_serialized: form.is_serialized,
+        })
+        .select("id")
+        .single();
 
       if (insertErr) throw insertErr;
+
+      if (serials.length > 0) {
+        const { error: unitsErr } = await supabase.from("inventory_units").insert(
+          serials.map((serial_no) => ({ inventory_id: inserted.id, serial_no }))
+        );
+        if (unitsErr) throw unitsErr;
+      }
 
       setForm(emptyForm);
       setShowAddForm(false);
@@ -258,10 +598,10 @@ export function Inventory() {
   }
 
   async function deleteItem(p: InventoryItem) {
-    if (!confirm(`Are you sure you want to delete or deactivate "${p.name}"?`)) return;
+    if (!confirm(`Are you sure you want to delete or deactivate "${p.name}"? A deleted product can be restored from the Recycle Bin.`)) return;
 
     try {
-      const { error: delErr } = await supabase.from("inventory").delete().eq("id", p.id);
+      const { error: delErr } = await softDelete(supabase, "inventory", p.id, p.name);
       if (delErr) {
         // Likely referenced by a sale/order — deactivate instead of a hard delete.
         await supabase.from("inventory").update({ is_active: false }).eq("id", p.id);
@@ -518,26 +858,44 @@ export function Inventory() {
                       </span>
                     )}
                   </td>
-                  <td
-                    className={`cursor-pointer text-right font-medium ${low ? "text-brand-danger font-bold" : ""}`}
-                    onClick={() => setEditingCell({ id: p.id, field: "stock" })}
-                    title="Click to adjust stock"
-                  >
-                    {editingCell?.id === p.id && editingCell.field === "stock" ? (
-                      <input
-                        autoFocus
-                        type="number"
-                        defaultValue={p.stock}
-                        className="w-16 rounded border border-brand-primary px-1 py-0.5 text-right text-sm"
-                        onBlur={(e) => updateField(p.id, "stock", Number(e.target.value))}
-                        onKeyDown={(e) => e.key === "Enter" && updateField(p.id, "stock", Number((e.target as HTMLInputElement).value))}
-                      />
-                    ) : (
+                  {p.is_serialized ? (
+                    <td
+                      className={`cursor-pointer text-right font-medium ${low ? "text-brand-danger font-bold" : ""}`}
+                      onClick={() => openSerialsModal(p)}
+                      title="Managed by serial number — click to view/add serials"
+                    >
                       <span className="underline decoration-dotted decoration-gray-300">{p.stock}</span>
-                    )}
-                  </td>
+                      <span className="ml-1 text-[10px] font-normal text-gray-400">(by serial)</span>
+                    </td>
+                  ) : (
+                    <td
+                      className={`cursor-pointer text-right font-medium ${low ? "text-brand-danger font-bold" : ""}`}
+                      onClick={() => setEditingCell({ id: p.id, field: "stock" })}
+                      title="Click to adjust stock"
+                    >
+                      {editingCell?.id === p.id && editingCell.field === "stock" ? (
+                        <input
+                          autoFocus
+                          type="number"
+                          defaultValue={p.stock}
+                          className="w-16 rounded border border-brand-primary px-1 py-0.5 text-right text-sm"
+                          onBlur={(e) => updateField(p.id, "stock", Number(e.target.value))}
+                          onKeyDown={(e) => e.key === "Enter" && updateField(p.id, "stock", Number((e.target as HTMLInputElement).value))}
+                        />
+                      ) : (
+                        <span className="underline decoration-dotted decoration-gray-300">{p.stock}</span>
+                      )}
+                    </td>
+                  )}
                   <td className="text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        className="btn-secondary !px-2 !py-1 text-xs"
+                        onClick={() => openSerialsModal(p)}
+                        title={p.is_serialized ? "View/add serial numbers" : "Track this product by serial number / IMEI"}
+                      >
+                        <Hash size={13} />
+                      </button>
                       <button
                         className="btn-secondary !px-2 !py-1 text-xs"
                         onClick={() => {
@@ -761,14 +1119,38 @@ export function Inventory() {
               </Field>
 
               {!editingItem && (
-                <Field label="Initial Stock">
-                  <input
-                    type="number"
-                    className="input w-full"
-                    value={form.stock}
-                    onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
-                  />
-                </Field>
+                <>
+                  <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={form.is_serialized}
+                      onChange={(e) => setForm({ ...form, is_serialized: e.target.checked })}
+                      className="rounded border-gray-300 text-brand-primary"
+                    />
+                    Track by Serial No. / IMEI (phones, tablets)
+                  </label>
+
+                  {form.is_serialized ? (
+                    <Field label="Serial Numbers (one per line, or comma-separated) — sets initial stock">
+                      <textarea
+                        className="input w-full"
+                        rows={3}
+                        placeholder={"359876543210987\n359876543210988"}
+                        value={form.serials}
+                        onChange={(e) => setForm({ ...form, serials: e.target.value })}
+                      />
+                    </Field>
+                  ) : (
+                    <Field label="Initial Stock">
+                      <input
+                        type="number"
+                        className="input w-full"
+                        value={form.stock}
+                        onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
+                      />
+                    </Field>
+                  )}
+                </>
               )}
 
               {(editingItem ? editingItem.product_type : form.product_type) === "refurbished" && (
@@ -864,6 +1246,300 @@ export function Inventory() {
               </button>
               <button type="button" className="btn-primary" onClick={editingItem ? saveEditedItem : addItem} disabled={saving}>
                 {saving ? "Saving..." : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {serialsModalFor && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+          <div className="card w-full max-w-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto">
+            <div className="mb-3 flex items-center justify-between border-b border-border pb-3">
+              <div>
+                <h2 className="text-base font-semibold text-gray-800">IMEI / Serial Numbers</h2>
+                <p className="text-xs text-gray-500">{serialsModalFor.name} {serialsModalFor.model}</p>
+              </div>
+              <button onClick={closeSerialsModal} className="text-gray-400 hover:text-gray-600">
+                <X size={18} />
+              </button>
+            </div>
+
+            {!serialsModalFor.is_serialized && (
+              <div className="mb-3 rounded-md bg-amber-50 border border-amber-200 p-2.5 text-xs text-amber-800">
+                This product isn't tracked by IMEI/serial yet. Add units below to turn tracking on —
+                stock will then be based on these units instead of the manual stock number.
+              </div>
+            )}
+
+            {serialsModalError && (
+              <div className="mb-3 flex items-start gap-2 rounded-md bg-red-50 p-2.5 text-xs text-brand-danger border border-red-200 whitespace-pre-wrap">
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <span>{serialsModalError}</span>
+              </div>
+            )}
+
+            <Field label="Expected quantity for this batch (optional — shows Missing/Extra warnings)">
+              <input
+                type="number"
+                className="input w-full !max-w-[140px]"
+                placeholder="e.g. 50"
+                value={expectedQty}
+                onChange={(e) => setExpectedQty(e.target.value ? Number(e.target.value) : "")}
+              />
+            </Field>
+
+            <div className="mt-3 flex gap-1 border-b border-border">
+              {([
+                ["manual", "Manual Entry", Keyboard],
+                ["excel", "Import Excel/CSV", FileSpreadsheet],
+                ["scan", "Scan IMEI", Camera],
+              ] as const).map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    if (key !== "scan") stopScanner();
+                    setSerialsMethod(key);
+                  }}
+                  className={`flex items-center gap-1.5 border-b-2 px-3 py-2 text-xs font-medium ${
+                    serialsMethod === key ? "border-brand-primary text-brand-primary" : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  <Icon size={13} /> {label}
+                </button>
+              ))}
+            </div>
+
+            {/* ── Manual Entry (Method C) ── */}
+            {serialsMethod === "manual" && (
+              <div className="mt-3">
+                <div className="mb-2 text-xs font-medium text-gray-500">
+                  Added: {manualRows.filter((r) => r.imei_1 || r.imei_2 || r.serial_no).length}
+                  {expectedQty !== "" ? ` / ${expectedQty}` : ""}
+                </div>
+                <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                  {manualRows.map((row, idx) => (
+                    <div key={idx} className="flex items-center gap-1.5">
+                      <span className="w-5 shrink-0 text-right text-xs text-gray-400">{idx + 1}</span>
+                      <input
+                        className="input !py-1 flex-1 text-xs"
+                        placeholder="IMEI 1"
+                        value={row.imei_1}
+                        onChange={(e) => {
+                          const next = [...manualRows];
+                          next[idx] = { ...next[idx], imei_1: e.target.value };
+                          setManualRows(next);
+                        }}
+                      />
+                      <input
+                        className="input !py-1 flex-1 text-xs"
+                        placeholder="IMEI 2 (optional)"
+                        value={row.imei_2}
+                        onChange={(e) => {
+                          const next = [...manualRows];
+                          next[idx] = { ...next[idx], imei_2: e.target.value };
+                          setManualRows(next);
+                        }}
+                      />
+                      <input
+                        className="input !py-1 flex-1 text-xs"
+                        placeholder="Serial No. (optional)"
+                        value={row.serial_no}
+                        onChange={(e) => {
+                          const next = [...manualRows];
+                          next[idx] = { ...next[idx], serial_no: e.target.value };
+                          setManualRows(next);
+                        }}
+                      />
+                      <button
+                        onClick={() => setManualRows(manualRows.filter((_, i) => i !== idx))}
+                        className="text-brand-danger shrink-0"
+                        title="Remove row"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 flex justify-between">
+                  <button
+                    className="btn-secondary !py-1 text-xs"
+                    onClick={() => setManualRows([...manualRows, { imei_1: "", imei_2: "", serial_no: "" }])}
+                  >
+                    <Plus size={12} /> Add Unit
+                  </button>
+                  <button
+                    className="btn-primary !py-1.5 text-xs"
+                    onClick={() => commitDraftRows(manualRows.filter((r) => r.imei_1 || r.imei_2 || r.serial_no))}
+                    disabled={serialsModalLoading}
+                  >
+                    {serialsModalLoading ? "Saving..." : "Save & Add to Stock"}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── Excel/CSV Import (Method B) ── */}
+            {serialsMethod === "excel" && (
+              <div className="mt-3">
+                {!excelPreview ? (
+                  <div className="rounded-md border border-dashed border-gray-300 p-4 text-center">
+                    <p className="mb-2 text-xs text-gray-500">
+                      Columns: <strong>IMEI 1</strong> | IMEI 2 | Serial Number (header row optional)
+                    </p>
+                    <input
+                      ref={excelInputRef}
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      className="hidden"
+                      onChange={(e) => handleExcelFile(e.target.files?.[0])}
+                    />
+                    <button className="btn-secondary text-xs" onClick={() => excelInputRef.current?.click()} disabled={serialsModalLoading}>
+                      <Upload size={13} /> {serialsModalLoading ? "Reading..." : "Choose File"}
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="mb-2 flex flex-wrap gap-2 text-xs">
+                      <span className="rounded bg-gray-100 px-2 py-1">Total Rows: {excelPreview.rows.length}</span>
+                      <span className="rounded bg-emerald-100 px-2 py-1 text-emerald-700">Valid: {excelPreview.valid}</span>
+                      <span className="rounded bg-amber-100 px-2 py-1 text-amber-700">Duplicate: {excelPreview.duplicate}</span>
+                      <span className="rounded bg-red-100 px-2 py-1 text-brand-danger">Invalid: {excelPreview.invalid}</span>
+                    </div>
+                    <div className="max-h-64 overflow-y-auto rounded border border-gray-200">
+                      <table className="w-full text-xs">
+                        <thead className="sticky top-0 bg-gray-50">
+                          <tr>
+                            <th className="p-1.5 text-left">Row</th>
+                            <th className="p-1.5 text-left">IMEI 1</th>
+                            <th className="p-1.5 text-left">IMEI 2</th>
+                            <th className="p-1.5 text-left">Serial</th>
+                            <th className="p-1.5 text-left">Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {excelPreview.rows.map((r) => (
+                            <tr key={r.row} className={r.errors.length ? "bg-red-50" : ""}>
+                              <td className="p-1.5">{r.row}</td>
+                              <td className="p-1.5 font-mono">{r.imei_1}</td>
+                              <td className="p-1.5 font-mono">{r.imei_2}</td>
+                              <td className="p-1.5 font-mono">{r.serial_no}</td>
+                              <td className="p-1.5">
+                                {r.errors.length ? (
+                                  <span className="text-brand-danger">{r.errors.join("; ")}</span>
+                                ) : (
+                                  <span className="text-emerald-600">OK</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-2 flex justify-between">
+                      <button className="btn-ghost text-xs" onClick={() => setExcelPreview(null)}>
+                        Choose different file
+                      </button>
+                      <button
+                        className="btn-primary !py-1.5 text-xs"
+                        onClick={commitExcelImport}
+                        disabled={serialsModalLoading || excelPreview.valid === 0}
+                      >
+                        {serialsModalLoading ? "Importing..." : `Import ${excelPreview.valid} Valid Row${excelPreview.valid === 1 ? "" : "s"}`}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── Scan IMEI (Method A) ── */}
+            {serialsMethod === "scan" && (
+              <div className="mt-3">
+                <div className="mb-2 text-xs font-medium text-gray-500">
+                  IMEI Added: {scannedPending.length}
+                  {expectedQty !== "" ? ` / ${expectedQty}` : ""}
+                </div>
+                <div id="imei-scanner-region" className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
+                {!scanActive ? (
+                  <button className="btn-secondary mt-2 w-full text-xs" onClick={startScanner}>
+                    <Camera size={13} /> Start Camera
+                  </button>
+                ) : (
+                  <button className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
+                    Stop Camera
+                  </button>
+                )}
+                {scanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{scanFeedback}</p>}
+                {scannedPending.length > 0 && (
+                  <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
+                    {scannedPending.map((r, i) => (
+                      <div key={i} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1 text-xs">
+                        <span className="font-mono">{r.imei_1}</span>
+                        <button onClick={() => setScannedPending(scannedPending.filter((_, j) => j !== i))} className="text-brand-danger">
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 flex justify-end">
+                  <button
+                    className="btn-primary !py-1.5 text-xs"
+                    onClick={commitScannedRows}
+                    disabled={serialsModalLoading || scannedPending.length === 0}
+                  >
+                    {serialsModalLoading ? "Saving..." : `Save ${scannedPending.length} Scanned Unit${scannedPending.length === 1 ? "" : "s"}`}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-4 border-t border-border pt-3">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-600">
+                  Existing units ({serialsModalUnits.filter((u) => u.status === "in_stock").length} in stock)
+                </span>
+              </div>
+              <div className="max-h-48 space-y-1 overflow-y-auto">
+                {serialsModalUnits.map((u) => (
+                  <div key={u.id} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1 text-xs">
+                    <span className="font-mono">
+                      {u.imei_1 ?? "-"}
+                      {u.imei_2 ? ` / ${u.imei_2}` : ""}
+                      {u.serial_no ? ` (SN: ${u.serial_no})` : ""}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={
+                          u.status === "in_stock"
+                            ? "text-emerald-600"
+                            : u.status === "sold"
+                              ? "text-gray-400"
+                              : ["damaged", "lost", "cancelled"].includes(u.status)
+                                ? "text-brand-danger"
+                                : "text-amber-600"
+                        }
+                      >
+                        {u.status.replace("_", " ")}
+                      </span>
+                      {u.status === "in_stock" && (
+                        <button onClick={() => deleteUnit(u)} className="text-brand-danger" title="Remove (mistaken entry only)">
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+                {serialsModalUnits.length === 0 && !serialsModalLoading && (
+                  <p className="text-xs text-gray-400">No units yet.</p>
+                )}
+              </div>
+            </div>
+
+            <div className="mt-4 flex justify-end border-t border-border pt-3">
+              <button className="btn-ghost" onClick={closeSerialsModal}>
+                Close
               </button>
             </div>
           </div>

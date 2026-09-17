@@ -63,6 +63,119 @@ export interface Product {
   updated_at: string;
 }
 
+// The live product/stock table is `inventory`, not `products` — the
+// `Product`/`CATEGORIES` types above describe a schema that predates a
+// migration applied directly to the database (see WholesalerInvoices'
+// history for the same drift). This is the type that actually matches
+// `public.inventory` today; use it for anything reading real stock data
+// (the website's catalog/homepage, the staff app), not `Product`.
+export type InventoryCategory = "Smartphones" | "Feature Phones" | "Tablets" | "Accessories" | "Refurbished";
+
+export const INVENTORY_CATEGORIES: InventoryCategory[] = [
+  "Smartphones",
+  "Feature Phones",
+  "Tablets",
+  "Accessories",
+  "Refurbished",
+];
+
+export interface Inventory {
+  id: string;
+  name: string;
+  brand_id: string | null;
+  brand?: { name: string } | null; // populated via `.select("*, brand:brands(name)")`
+  model: string;
+  category: InventoryCategory | null;
+  product_type: "new" | "refurbished";
+  price: number;
+  original_price: number | null;
+  stock: number;
+  images: string[] | null;
+  specs: Record<string, unknown> | null;
+  condition: "Excellent" | "Good" | "Fair" | null;
+  grade: "A" | "B" | "C" | null;
+  battery_health: number | null;
+  warranty_months: number;
+  is_featured: boolean;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+  cost_price: number | null;
+  /** When true, stock is tracked per physical unit in `inventory_units` (see InventoryUnit) and `stock` is auto-derived — not manually edited. */
+  is_serialized: boolean;
+}
+
+export type InventoryUnitStatus =
+  | "in_stock"
+  | "sold"
+  | "returned"
+  | "warranty"
+  | "repair"
+  | "replaced"
+  | "damaged"
+  | "lost"
+  | "pending_imei"
+  | "cancelled";
+
+/** One physical unit (IMEI/serial) of a product with `inventory.is_serialized = true`. */
+export interface InventoryUnit {
+  id: string;
+  inventory_id: string;
+  /** Primary IMEI (15-digit, Luhn-valid). Null for serial-only accessories. */
+  imei_1: string | null;
+  /** Secondary IMEI for dual-SIM devices — same physical unit as imei_1. */
+  imei_2: string | null;
+  /** Serial number — sole identifier for non-IMEI serialized products, or alongside imei_1/imei_2. */
+  serial_no: string | null;
+  status: InventoryUnitStatus;
+  sale_item_id: string | null;
+  purchase_price: number | null;
+  purchase_invoice_ref: string | null;
+  supplier_id: string | null;
+  current_location: string | null;
+  /** Set on the NEW unit issued in a replacement — points at the OLD unit it replaces. */
+  replaced_from_unit_id: string | null;
+  /** Set on the OLD unit once replaced — points at the NEW unit issued in its place. */
+  replaced_by_unit_id: string | null;
+  customer_id: string | null;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  sold_at: string | null;
+}
+
+export type ImeiHistoryEventType =
+  | "purchase"
+  | "in_stock"
+  | "sale"
+  | "return"
+  | "warranty"
+  | "repair"
+  | "replaced"
+  | "status_change"
+  | "cancelled"
+  | "note";
+
+/** Immutable audit event on a stock unit's lifecycle timeline. */
+export interface ImeiHistoryEvent {
+  id: string;
+  stock_unit_id: string;
+  imei_1: string | null;
+  imei_2: string | null;
+  event_type: ImeiHistoryEventType;
+  event_date: string;
+  reference_type: string | null;
+  reference_id: string | null;
+  from_status: InventoryUnitStatus | null;
+  to_status: InventoryUnitStatus | null;
+  customer_id: string | null;
+  supplier_id: string | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
 export interface Supplier {
   id: string;
   name: string;
@@ -106,6 +219,12 @@ export interface BusinessProfile {
 
 export type SaleType = "online" | "offline";
 export type PaymentMethod = "cash" | "card" | "upi" | "bank_transfer" | "other";
+// The live `sales.payment_method` check constraint — matches "cash",
+// "upi", "card", "emi", "credit" (not the values in PaymentMethod above,
+// which predate the same schema drift documented on the Inventory type).
+export type SalePaymentMethod = "cash" | "upi" | "card" | "emi" | "credit";
+export type SaleTypeLive = "in_store" | "website" | "emi";
+export type SalePaymentStatus = "paid" | "pending" | "partial";
 
 export interface Sale {
   id: string;
@@ -267,9 +386,123 @@ export interface ThirdPartyPurchase {
   notes: string | null;
 }
 
+export type FinanceIntegrationType = "manual" | "portal_based" | "pos_based" | "api_integrated";
+
 export interface FinancePartner {
   id: string;
   name: string;
+  short_code: string | null;
+  description: string | null;
+  logo_url: string | null;
+  min_amount: number | null;
+  max_amount: number | null;
+  available_tenures: number[];
+  processing_fee_pct: number;
+  integration_type: FinanceIntegrationType;
+  contact_notes: string | null;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type FinanceStatus =
+  | "draft"
+  | "application_started"
+  | "submitted"
+  | "pending"
+  | "approved"
+  | "disbursement_pending"
+  | "disbursed"
+  | "settlement_pending"
+  | "settled"
+  | "rejected"
+  | "cancelled"
+  | "failed";
+
+export const FINANCE_STATUSES: FinanceStatus[] = [
+  "draft",
+  "application_started",
+  "submitted",
+  "pending",
+  "approved",
+  "disbursement_pending",
+  "disbursed",
+  "settlement_pending",
+  "settled",
+  "rejected",
+  "cancelled",
+  "failed",
+];
+
+/** Allowed next statuses per current status — mirrors the DB trigger in 0031_finance_module.sql; keep both in sync. */
+export const FINANCE_STATUS_TRANSITIONS: Record<FinanceStatus, FinanceStatus[]> = {
+  draft: ["application_started", "cancelled"],
+  application_started: ["submitted", "cancelled"],
+  submitted: ["pending", "cancelled"],
+  pending: ["approved", "rejected", "cancelled"],
+  approved: ["disbursement_pending", "cancelled"],
+  disbursement_pending: ["disbursed", "failed", "cancelled"],
+  disbursed: ["settlement_pending"],
+  settlement_pending: ["settled", "failed"],
+  settled: [],
+  rejected: [],
+  cancelled: [],
+  failed: [],
+};
+
+export type ReconciliationStatus = "pending" | "matched" | "mismatch";
+
+export interface FinanceTransaction {
+  id: string;
+  customer_id: string | null;
+  sale_id: string | null;
+  stock_unit_id: string | null;
+  /** Nullable — required for new finance sales at the app layer (Finance.tsx), but legacy backfilled emi_finance rows whose free-text company didn't match a real partner are allowed a null link rather than inventing one. */
+  finance_partner_id: string | null;
+  invoice_number: string | null;
+  customer_name: string;
+  customer_phone: string | null;
+  product_name: string;
+  brand: string | null;
+  model: string | null;
+  imei_1: string | null;
+  imei_2: string | null;
+  serial_no: string | null;
+  sale_amount: number;
+  down_payment: number;
+  customer_paid_amount: number;
+  finance_amount: number;
+  tenure_months: number;
+  emi_amount: number;
+  finance_date: string;
+  application_number: string | null;
+  agreement_number: string | null;
+  status: FinanceStatus;
+  notes: string | null;
+  expected_settlement_amount: number | null;
+  actual_settlement_amount: number | null;
+  processing_fee: number;
+  commission: number;
+  other_deduction: number;
+  adjustment: number;
+  settlement_date: string | null;
+  settlement_reference: string | null;
+  reconciliation_status: ReconciliationStatus;
+  created_by: string | null;
+  updated_by: string | null;
+  created_at: string;
+  updated_at: string;
+  finance_partner?: { name: string; short_code: string | null } | null;
+}
+
+export interface FinanceStatusHistoryEvent {
+  id: string;
+  finance_transaction_id: string;
+  from_status: FinanceStatus | null;
+  to_status: FinanceStatus;
+  note: string | null;
+  changed_by: string | null;
+  created_at: string;
 }
 
 export interface Enquiry {

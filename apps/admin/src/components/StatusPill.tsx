@@ -8,6 +8,6 @@ const TONE_CLASS: Record<string, string> = {
   neutral: "pill-neutral",
 };
 
-export function StatusPill({ status, label }: { status: string; label?: string }) {
-  return <span className={TONE_CLASS[statusTone(status)]}>{label ?? status}</span>;
+export function StatusPill({ status, label }: { status: string | null | undefined; label?: string }) {
+  return <span className={TONE_CLASS[statusTone(status)]}>{label ?? status ?? "-"}</span>;
 }

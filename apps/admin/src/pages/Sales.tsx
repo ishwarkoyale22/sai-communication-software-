@@ -3,7 +3,7 @@ import { formatCurrency, formatDateTime, generateSimpleInvoicePdf, openRetailTax
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Plus, Trash2, X, Printer, Receipt } from "lucide-react";
+import { Plus, Trash2, X, Printer, Eye } from "lucide-react";
 
 interface Customer {
   id: string;
@@ -21,6 +21,22 @@ interface InventoryItem {
   model: string;
   price: number;
   stock: number;
+  is_serialized: boolean;
+}
+interface AvailableUnit {
+  id: string;
+  imei_1: string | null;
+  imei_2: string | null;
+  serial_no: string | null;
+}
+
+/** Human-readable identifier for a stock unit — IMEI(s) preferred, serial as fallback/extra. */
+function unitLabel(u: { imei_1: string | null; imei_2: string | null; serial_no: string | null }): string {
+  const parts: string[] = [];
+  if (u.imei_1) parts.push(u.imei_1);
+  if (u.imei_2) parts.push(u.imei_2);
+  if (u.serial_no) parts.push(`SN: ${u.serial_no}`);
+  return parts.join(" / ") || "-";
 }
 interface Sale {
   id: string;
@@ -38,10 +54,18 @@ interface Sale {
   created_at: string;
 }
 interface CartLine {
+  /** Unique per cart line — the inventory_id for a merged non-serialized line, or the specific unit_id for a serialized one (each physical unit is its own line). */
+  key: string;
   inventory_id: string;
   item_name: string;
   quantity: number;
   unit_price: number;
+  /** Serial No. / IMEI(s) for this line, comma-separated when quantity > 1 — optional, shown on the printed invoice when present. */
+  serial_no: string;
+  /** Set when this line is one specific serialized inventory_units row — quantity is locked at 1 and serial_no is read-only, sourced from the picked unit. */
+  unit_id: string | null;
+  /** Original unit shape, kept so removeLine can restore it to the picker exactly (imei_1/imei_2 split intact). */
+  unitSnapshot?: AvailableUnit;
 }
 
 function nextInvoiceNumber() {
@@ -66,6 +90,8 @@ export function Sales() {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [cart, setCart] = useState<CartLine[]>([]);
   const [pickId, setPickId] = useState("");
+  const [availableUnits, setAvailableUnits] = useState<AvailableUnit[]>([]);
+  const [pickUnitId, setPickUnitId] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [invoiceLoadingId, setInvoiceLoadingId] = useState<string | null>(null);
@@ -73,7 +99,7 @@ export function Sales() {
   useEffect(() => {
     load();
     supabase.from("customers").select("id, name, phone, birthday").order("name").then(({ data }) => setCustomers((data as Customer[]) ?? []));
-    supabase.from("inventory").select("id, name, model, price, stock").eq("is_active", true).order("name").then(({ data }) => setInventory((data as InventoryItem[]) ?? []));
+    supabase.from("inventory").select("id, name, model, price, stock, is_serialized").eq("is_active", true).order("name").then(({ data }) => setInventory((data as InventoryItem[]) ?? []));
     supabase.from("staff").select("id, name").eq("is_active", true).order("name").then(({ data }) => setStaffList((data as StaffLite[]) ?? []));
     const channel = supabase
       .channel("sales-page")
@@ -89,28 +115,81 @@ export function Sales() {
     setSales((data as Sale[]) ?? []);
   }
 
+  async function loadAvailableUnits(inventoryId: string) {
+    const { data } = await supabase
+      .from("inventory_units")
+      .select("id, imei_1, imei_2, serial_no")
+      .eq("inventory_id", inventoryId)
+      .eq("status", "in_stock")
+      .order("created_at");
+    setAvailableUnits((data as AvailableUnit[]) ?? []);
+  }
+
+  function onPickItem(id: string) {
+    setPickId(id);
+    setPickUnitId("");
+    const item = inventory.find((i) => i.id === id);
+    if (item?.is_serialized) loadAvailableUnits(id);
+    else setAvailableUnits([]);
+  }
+
   function addToCart() {
     const item = inventory.find((i) => i.id === pickId);
     if (!item) return;
+
+    if (item.is_serialized) {
+      const unit = availableUnits.find((u) => u.id === pickUnitId);
+      if (!unit) return; // Add button is disabled until a serial is picked
+      setCart((prev) => [
+        ...prev,
+        {
+          key: unit.id,
+          inventory_id: item.id,
+          item_name: `${item.name} ${item.model}`,
+          quantity: 1,
+          unit_price: item.price,
+          serial_no: unitLabel(unit),
+          unit_id: unit.id,
+          unitSnapshot: unit,
+        },
+      ]);
+      setAvailableUnits((prev) => prev.filter((u) => u.id !== unit.id));
+      setPickUnitId("");
+      return;
+    }
+
     setCart((prev) => {
-      const existing = prev.find((l) => l.inventory_id === item.id);
+      const existing = prev.find((l) => l.inventory_id === item.id && l.unit_id === null);
       if (existing) {
-        return prev.map((l) => (l.inventory_id === item.id ? { ...l, quantity: l.quantity + 1 } : l));
+        return prev.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l));
       }
-      return [...prev, { inventory_id: item.id, item_name: `${item.name} ${item.model}`, quantity: 1, unit_price: item.price }];
+      return [...prev, { key: item.id, inventory_id: item.id, item_name: `${item.name} ${item.model}`, quantity: 1, unit_price: item.price, serial_no: "", unit_id: null }];
     });
     setPickId("");
   }
 
-  function updateQty(id: string, qty: number) {
-    setCart((prev) => prev.map((l) => (l.inventory_id === id ? { ...l, quantity: Math.max(1, qty) } : l)));
+  function updateQty(key: string, qty: number) {
+    setCart((prev) => prev.map((l) => (l.key === key ? { ...l, quantity: Math.max(1, qty) } : l)));
   }
 
-  function removeLine(id: string) {
-    setCart((prev) => prev.filter((l) => l.inventory_id !== id));
+  function updateSerial(key: string, serial_no: string) {
+    setCart((prev) => prev.map((l) => (l.key === key ? { ...l, serial_no } : l)));
+  }
+
+  function removeLine(key: string) {
+    // Returning a serialized unit to the cart's available-serials picker so
+    // it isn't lost if the cashier removed it by mistake before completing the sale.
+    setCart((prev) => {
+      const line = prev.find((l) => l.key === key);
+      if (line?.unit_id && line.inventory_id === pickId && line.unitSnapshot) {
+        setAvailableUnits((units) => [...units, line.unitSnapshot!]);
+      }
+      return prev.filter((l) => l.key !== key);
+    });
   }
 
   const cartTotal = cart.reduce((sum, l) => sum + l.quantity * l.unit_price, 0);
+  const pickedItem = inventory.find((i) => i.id === pickId);
 
   async function createSale() {
     if (cart.length === 0) {
@@ -178,27 +257,79 @@ export function Sales() {
 
       if (saleErr) throw saleErr;
 
+      // Defensive re-check right before committing: the dropdown was built
+      // from a snapshot, so if another tab/cashier sold one of these exact
+      // units in the meantime, block the whole sale rather than silently
+      // re-selling it (spec: "This IMEI is already sold.").
+      const unitIds = cart.map((l) => l.unit_id).filter((id): id is string => !!id);
+      if (unitIds.length > 0) {
+        const { data: liveUnits } = await supabase.from("inventory_units").select("id, status, imei_1, imei_2, serial_no").in("id", unitIds);
+        const notInStock = (liveUnits ?? []).filter((u) => u.status !== "in_stock");
+        if (notInStock.length > 0) {
+          const labels = notInStock.map((u) => unitLabel(u as AvailableUnit)).join(", ");
+          throw new Error(`This IMEI is already ${notInStock[0].status}: ${labels}. Remove it from the cart and refresh.`);
+        }
+      }
+
+      // IDs are generated client-side (rather than relying on the insert's
+      // returned row order) so each cart line's sales_items id is known up
+      // front, for linking sold inventory_units back to the exact line below.
+      const cartWithIds = cart.map((l) => ({ ...l, salesItemId: crypto.randomUUID() }));
+
       const { error: itemsErr } = await supabase.from("sales_items").insert(
-        cart.map((l) => ({
+        cartWithIds.map((l) => ({
+          id: l.salesItemId,
           sale_id: sale.id,
           inventory_id: l.inventory_id,
           item_name: l.item_name,
           quantity: l.quantity,
           unit_price: l.unit_price,
           total_price: l.quantity * l.unit_price,
+          serial_no: l.serial_no.trim() || null,
         }))
       );
       if (itemsErr) throw itemsErr;
 
-      // Deduct stock for each line — best-effort per item so one bad row
-      // doesn't block the rest; the sale itself is already saved above.
-      for (const l of cart) {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const userId = session?.user?.id ?? null;
+
+      // Serialized lines: mark the specific physical unit sold and linked to
+      // its sale line — inventory.stock then auto-updates via the
+      // inventory_units trigger, so no manual stock decrement needed here.
+      // Also write the 'sale' lifecycle event (spec §12) with customer +
+      // invoice reference, so the unit's history/timeline shows it.
+      // Non-serialized lines: unaffected, same manual decrement as before.
+      for (const l of cartWithIds) {
+        if (l.unit_id) {
+          await supabase
+            .from("inventory_units")
+            .update({ status: "sold", sale_item_id: l.salesItemId, customer_id: finalCustomerId, sold_at: new Date().toISOString(), updated_by: userId })
+            .eq("id", l.unit_id);
+          await supabase.from("imei_history").insert({
+            stock_unit_id: l.unit_id,
+            imei_1: l.unitSnapshot?.imei_1 ?? null,
+            imei_2: l.unitSnapshot?.imei_2 ?? null,
+            event_type: "sale",
+            reference_type: "sale",
+            reference_id: sale.invoice_number,
+            from_status: "in_stock",
+            to_status: "sold",
+            customer_id: finalCustomerId,
+            created_by: userId,
+          });
+          continue;
+        }
         const item = inventory.find((i) => i.id === l.inventory_id);
         if (!item) continue;
         await supabase.from("inventory").update({ stock: Math.max(0, item.stock - l.quantity) }).eq("id", l.inventory_id);
       }
 
       setCart([]);
+      setPickId("");
+      setPickUnitId("");
+      setAvailableUnits([]);
       setCustomerId("");
       setCustomerName("");
       setCustomerPhone("");
@@ -206,7 +337,7 @@ export function Sales() {
       setStaffId("");
       setShowForm(false);
       await load();
-      const { data: freshInv } = await supabase.from("inventory").select("id, name, model, price, stock").eq("is_active", true).order("name");
+      const { data: freshInv } = await supabase.from("inventory").select("id, name, model, price, stock, is_serialized").eq("is_active", true).order("name");
       setInventory((freshInv as InventoryItem[]) ?? []);
     } catch (err: any) {
       setError(err?.message || "Failed to create sale.");
@@ -249,15 +380,22 @@ export function Sales() {
   }
 
   // GST-style "Tax Invoice" matching the shop's real paper invoice format
-  // (CGST/SGST breakdown, HSN/SAC, amount in words) — a separate, richer
-  // invoice style alongside the plain one above, not a replacement for it.
-  async function printGstInvoice(sale: Sale) {
+  // (CGST/SGST breakdown, HSN/SAC, amount in words) — this is what the
+  // "Print" button opens; generateSimpleInvoicePdf above is only used for
+  // the plain "Download" PDF, which is a separate, simpler artifact.
+  async function printGstInvoice(sale: Sale, mode: "print" | "view" = "print") {
     setInvoiceLoadingId(sale.id);
     try {
-      const { data: items } = await supabase
+      // sales_items on the live DB has item_name/quantity/total_price plus
+      // serial_no (added by migration 0028 for IMEI/serial capture at sale
+      // time) — hsn_sac is still not a real column there (the SaleItem TS
+      // type is aspirational for that field, same schema drift documented
+      // elsewhere in this repo), so it's deliberately left out of this select.
+      const { data: items, error: itemsErr } = await supabase
         .from("sales_items")
-        .select("item_name, quantity, total_price")
+        .select("item_name, quantity, total_price, serial_no")
         .eq("sale_id", sale.id);
+      if (itemsErr) throw itemsErr;
       openRetailTaxInvoice({
         invoiceNumber: sale.invoice_number,
         createdAt: sale.created_at,
@@ -269,9 +407,11 @@ export function Sales() {
           name: i.item_name,
           quantity: i.quantity,
           totalPrice: i.total_price,
+          serialNo: i.serial_no ?? null,
         })),
         totalAmount: sale.final_amount,
         shop: SHOP,
+        mode,
       });
     } catch (err: any) {
       alert(err?.message || "Failed to generate GST invoice.");
@@ -324,7 +464,7 @@ export function Sales() {
               <th className="text-right">Total</th>
               <th>Payment</th>
               <th>Date</th>
-              <th className="text-right">Invoice</th>
+              <th className="text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -344,25 +484,25 @@ export function Sales() {
                       className="btn-ghost !px-2 !py-1 text-xs"
                       disabled={invoiceLoadingId === s.id}
                       onClick={() => downloadInvoice(s, "download")}
-                      title="Download invoice PDF"
+                      title="Download plain invoice PDF"
                     >
                       Download
                     </button>
                     <button
                       className="btn-secondary !px-2 !py-1 text-xs"
                       disabled={invoiceLoadingId === s.id}
-                      onClick={() => downloadInvoice(s, "print")}
-                      title="Print invoice"
+                      onClick={() => printGstInvoice(s, "view")}
+                      title="View the Tax Invoice online (no print dialog)"
                     >
-                      <Printer size={13} />
+                      <Eye size={13} /> View
                     </button>
                     <button
                       className="btn-secondary !px-2 !py-1 text-xs"
                       disabled={invoiceLoadingId === s.id}
                       onClick={() => printGstInvoice(s)}
-                      title="Print GST Tax Invoice (Retail Sale format, CGST/SGST breakdown)"
+                      title="Print the real Tax Invoice (shop's paper format, CGST/SGST breakdown)"
                     >
-                      <Receipt size={13} /> GST Invoice
+                      <Printer size={13} /> Print
                     </button>
                   </div>
                 </td>
@@ -430,27 +570,64 @@ export function Sales() {
             </select>
 
             <div className="flex gap-2">
-              <select className="input flex-1" value={pickId} onChange={(e) => setPickId(e.target.value)}>
+              <select className="input flex-1" value={pickId} onChange={(e) => onPickItem(e.target.value)}>
                 <option value="">Select an item to add...</option>
                 {inventory.map((i) => (
-                  <option key={i.id} value={i.id}>{i.name} {i.model} — {formatCurrency(i.price)} ({i.stock} in stock)</option>
+                  <option key={i.id} value={i.id}>
+                    {i.name} {i.model} — {formatCurrency(i.price)} ({i.stock} in stock){i.is_serialized ? " · by serial" : ""}
+                  </option>
                 ))}
               </select>
-              <button className="btn-secondary" onClick={addToCart} disabled={!pickId}>Add</button>
+              {pickedItem?.is_serialized ? (
+                <select className="input !w-48" value={pickUnitId} onChange={(e) => setPickUnitId(e.target.value)}>
+                  <option value="">Select serial...</option>
+                  {availableUnits.map((u) => (
+                    <option key={u.id} value={u.id}>{unitLabel(u)}</option>
+                  ))}
+                </select>
+              ) : null}
+              <button
+                className="btn-secondary"
+                onClick={addToCart}
+                disabled={!pickId || (!!pickedItem?.is_serialized && !pickUnitId)}
+              >
+                Add
+              </button>
             </div>
+            {pickedItem?.is_serialized && availableUnits.length === 0 && (
+              <p className="text-xs text-brand-danger">
+                No serial numbers in stock for this item — add stock via Inventory → Serials first.
+              </p>
+            )}
 
-            <div className="max-h-48 space-y-1 overflow-y-auto">
+            <div className="max-h-64 space-y-1.5 overflow-y-auto">
               {cart.map((l) => (
-                <div key={l.inventory_id} className="flex items-center gap-2 rounded border border-gray-200 p-2 text-sm">
-                  <span className="flex-1">{l.item_name}</span>
-                  <input
-                    type="number"
-                    className="input !w-16 !py-0.5 text-right"
-                    value={l.quantity}
-                    onChange={(e) => updateQty(l.inventory_id, Number(e.target.value))}
-                  />
-                  <span className="w-20 text-right font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
-                  <button onClick={() => removeLine(l.inventory_id)} className="text-brand-danger"><Trash2 size={13} /></button>
+                <div key={l.key} className="rounded border border-gray-200 p-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className="flex-1">{l.item_name}</span>
+                    {l.unit_id ? (
+                      <span className="w-16 text-right text-gray-400">×1</span>
+                    ) : (
+                      <input
+                        type="number"
+                        className="input !w-16 !py-0.5 text-right"
+                        value={l.quantity}
+                        onChange={(e) => updateQty(l.key, Number(e.target.value))}
+                      />
+                    )}
+                    <span className="w-20 text-right font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
+                    <button onClick={() => removeLine(l.key)} className="text-brand-danger"><Trash2 size={13} /></button>
+                  </div>
+                  {l.unit_id ? (
+                    <div className="mt-1 text-xs text-gray-500">Serial: <span className="font-mono">{l.serial_no}</span></div>
+                  ) : (
+                    <input
+                      className="input !py-0.5 mt-1.5 text-xs"
+                      placeholder={l.quantity > 1 ? "Serial No. / IMEI (comma-separated, optional)" : "Serial No. / IMEI (optional)"}
+                      value={l.serial_no}
+                      onChange={(e) => updateSerial(l.key, e.target.value)}
+                    />
+                  )}
                 </div>
               ))}
               {cart.length === 0 && <p className="text-sm text-gray-400">No items added yet.</p>}

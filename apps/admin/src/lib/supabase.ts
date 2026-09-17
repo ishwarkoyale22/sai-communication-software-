@@ -20,7 +20,7 @@ export const SHOP = {
     (import.meta.env.VITE_SHOP_ADDRESS as string) ||
     "Shop No.30, P L Khandge Plaza, Talegaon Chakan Road, Talegaon Station, Tal-Maval",
   phone: (import.meta.env.VITE_SHOP_PHONE as string) || "9822662266",
-  gstNumber: (import.meta.env.VITE_SHOP_GSTIN as string) || "27APCPG901SL1ZS",
+  gstNumber: (import.meta.env.VITE_SHOP_GSTIN as string) || "27APCPG9015L1ZS",
   email: (import.meta.env.VITE_SHOP_EMAIL as string) || "saicommunication2266@gmail.com",
   // Used on the GST Tax Invoice's "State: <code>-<name>" line — 27 is
   // Maharashtra's actual GST state code, matching this shop's real

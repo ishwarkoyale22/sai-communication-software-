@@ -8,12 +8,12 @@ everywhere else via Supabase Realtime.
 
 ```
 apps/
-  admin/     Vite + React — owner's full-control back office (http://localhost:5173)
-  staff/     Vite + React — mobile-first billing/clock-in portal (http://localhost:5174)
+  admin/     Vite + React — owner's full-control back office, plus the staff
+             portal at /portal (mobile-first billing/clock-in) (http://localhost:5173)
   web/       Next.js 14 — public catalog + enquiry form (http://localhost:3000)
 packages/
-  shared/    One Supabase client, TS types, Excel export util, GST PDF generator,
-             design tokens — imported by all three apps as "@sai/shared"
+  shared/    One Supabase client, TS types, Excel export util, tax invoice
+             generators — imported by both apps as "@sai/shared"
 supabase/
   migrations/  Run in order: 0001 schema, 0002 functions/triggers, 0003 RLS, 0004 realtime,
                0005 Phase 1 gap-fill schema, 0006 Phase 1 gap-fill RLS/realtime
@@ -60,15 +60,13 @@ from step 1:
 
 ```bash
 cp apps/admin/.env.example apps/admin/.env
-cp apps/staff/.env.example apps/staff/.env
 cp apps/web/.env.example apps/web/.env.local
 ```
 
 ## 4. Run
 
 ```bash
-npm run dev:admin   # http://localhost:5173
-npm run dev:staff   # http://localhost:5174
+npm run dev:admin   # http://localhost:5173 (staff portal at /portal)
 npm run dev:web     # http://localhost:3000
 ```
 

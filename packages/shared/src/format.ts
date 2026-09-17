@@ -28,8 +28,9 @@ export function formatDateTime(d: string | Date | null | undefined): string {
 
 /** Status -> pill color token, used by the shared <StatusPill> in each app. */
 export function statusTone(
-  status: string
+  status: string | null | undefined
 ): "success" | "warning" | "danger" | "info" | "neutral" {
+  if (!status) return "neutral";
   const s = status.toLowerCase();
   if (["active", "paid", "collected", "processed", "ready", "approved"].includes(s)) return "success";
   if (["pending", "emi", "waiting_parts", "in_progress"].includes(s)) return "warning";

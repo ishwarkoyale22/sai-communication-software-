@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatCurrency } from "@sai/shared";
+import { formatCurrency, softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { Plus, Trash2, X, Package } from "lucide-react";
@@ -104,8 +104,8 @@ export function GiftHampers() {
   }
 
   async function removeHamper(h: HamperItem) {
-    if (!confirm(`Delete "${h.name}"?`)) return;
-    const { error: delErr } = await supabase.from("hamper_items").delete().eq("id", h.id);
+    if (!confirm(`Delete "${h.name}"? You can restore it from the Recycle Bin afterwards (its product list will need re-adding).`)) return;
+    const { error: delErr } = await softDelete(supabase, "hamper_items", h.id, h.name);
     if (delErr) await supabase.from("hamper_items").update({ is_active: false }).eq("id", h.id);
     load();
   }
@@ -163,8 +163,10 @@ export function GiftHampers() {
       </p>
 
       <div className="grid grid-cols-3 gap-3">
-        {hampers.map((h) => (
-          <div key={h.id} className={`card p-4 ${!h.is_active ? "opacity-50" : ""}`}>
+        {hampers.map((h) => {
+          const tile = h.stock <= 0 ? "card-red" : h.stock < 5 ? "card-amber" : "card-gold";
+          return (
+          <div key={h.id} className={`${tile} p-4 ${!h.is_active ? "opacity-50" : ""}`}>
             <div className="font-medium text-gray-800">{h.name}</div>
             <div className="mt-1 text-sm text-gray-500">{h.category ?? "-"}</div>
             <div className="mt-2 flex items-center justify-between">
@@ -203,7 +205,8 @@ export function GiftHampers() {
               </button>
             </div>
           </div>
-        ))}
+          );
+        })}
         {hampers.length === 0 && <p className="text-sm text-gray-400">No gift hampers yet.</p>}
       </div>
 

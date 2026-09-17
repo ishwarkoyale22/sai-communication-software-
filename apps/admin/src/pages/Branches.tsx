@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
@@ -75,8 +76,8 @@ export function Branches() {
       alert("Can't delete the main branch — mark another branch as main first.");
       return;
     }
-    if (!confirm(`Delete branch "${b.name}"?`)) return;
-    await supabase.from("branches").delete().eq("id", b.id);
+    if (!confirm(`Delete branch "${b.name}"? You can restore it from the Recycle Bin afterwards.`)) return;
+    await softDelete(supabase, "branches", b.id, b.name);
     load();
   }
 

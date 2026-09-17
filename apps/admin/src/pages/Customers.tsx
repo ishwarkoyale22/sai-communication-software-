@@ -39,6 +39,24 @@ interface RepairRow {
   received_at: string;
 }
 
+interface FinanceRow {
+  id: string;
+  invoice_number: string | null;
+  product_name: string;
+  imei_1: string | null;
+  serial_no: string | null;
+  finance_amount: number;
+  down_payment: number;
+  tenure_months: number;
+  emi_amount: number;
+  application_number: string | null;
+  agreement_number: string | null;
+  status: string;
+  reconciliation_status: string;
+  finance_date: string;
+  finance_partner: { name: string } | null;
+}
+
 type SortKey = "name" | "purchases_desc" | "spend_desc" | "recent";
 
 export function Customers() {
@@ -52,6 +70,7 @@ export function Customers() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [selected, setSelected] = useState<Customer | null>(null);
   const [repairs, setRepairs] = useState<RepairRow[]>([]);
+  const [financeHistory, setFinanceHistory] = useState<FinanceRow[]>([]);
 
   useEffect(() => {
     load();
@@ -76,6 +95,12 @@ export function Customers() {
       .eq("customer_id", selected.id)
       .order("received_at", { ascending: false })
       .then(({ data }) => setRepairs((data as RepairRow[]) ?? []));
+    supabase
+      .from("finance_transactions")
+      .select("id, invoice_number, product_name, imei_1, serial_no, finance_amount, down_payment, tenure_months, emi_amount, application_number, agreement_number, status, reconciliation_status, finance_date, finance_partner:finance_partner_id(name)")
+      .eq("customer_id", selected.id)
+      .order("finance_date", { ascending: false })
+      .then(({ data }) => setFinanceHistory((data as unknown as FinanceRow[]) ?? []));
   }, [selected]);
 
   async function load() {
@@ -258,7 +283,7 @@ export function Customers() {
             </div>
 
             <div className="mb-2 text-xs font-semibold uppercase text-gray-400">Repairs</div>
-            <div className="max-h-40 space-y-1 overflow-y-auto">
+            <div className="mb-4 max-h-40 space-y-1 overflow-y-auto">
               {repairs.map((r) => (
                 <div key={r.id} className="flex items-center justify-between text-sm">
                   <span>{r.device_brand} {r.device_model}</span>
@@ -267,6 +292,32 @@ export function Customers() {
                 </div>
               ))}
               {repairs.length === 0 && <p className="text-sm text-gray-400">No repairs on file</p>}
+            </div>
+
+            <div className="mb-2 text-xs font-semibold uppercase text-gray-400">Finance / EMI History</div>
+            <div className="max-h-48 space-y-2 overflow-y-auto">
+              {financeHistory.map((f) => (
+                <div key={f.id} className="rounded border border-gray-100 p-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="font-medium">{f.product_name}</span>
+                    <span className="font-medium">{formatCurrency(f.finance_amount)}</span>
+                  </div>
+                  <div className="mt-0.5 flex justify-between text-xs text-gray-500">
+                    <span>{f.finance_partner?.name ?? "-"} · {f.tenure_months}mo · {formatCurrency(f.emi_amount)}/mo</span>
+                    <StatusPill status={f.status} />
+                  </div>
+                  <div className="mt-0.5 flex justify-between text-xs text-gray-500">
+                    <span>{f.invoice_number ?? "-"} {f.imei_1 ? `· IMEI ${f.imei_1}` : f.serial_no ? `· SN ${f.serial_no}` : ""}</span>
+                    <span>{formatDate(f.finance_date)}</span>
+                  </div>
+                  {(f.application_number || f.agreement_number) && (
+                    <div className="mt-0.5 text-xs text-gray-400">
+                      {f.application_number ? `App# ${f.application_number}` : ""}{f.application_number && f.agreement_number ? " · " : ""}{f.agreement_number ? `Loan# ${f.agreement_number}` : ""}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {financeHistory.length === 0 && <p className="text-sm text-gray-400">No finance/EMI purchases yet</p>}
             </div>
           </div>
         </div>

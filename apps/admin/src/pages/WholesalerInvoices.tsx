@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { formatDate, formatCurrency } from "@sai/shared";
-import { supabase } from "../lib/supabase";
+import { formatDate, formatCurrency, openPurchaseBill } from "@sai/shared";
+import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Plus, X } from "lucide-react";
+import { Plus, X, Printer, Eye } from "lucide-react";
 
 interface WholesalerInvoice {
   id: string;
@@ -79,6 +79,29 @@ export function WholesalerInvoices() {
     load();
   }
 
+  function printBill(inv: WholesalerInvoice, mode: "print" | "view" = "print") {
+    const rawItems = Array.isArray(inv.items) ? (inv.items as any[]) : [];
+    const items = rawItems.length > 0
+      ? rawItems.map((it) => ({
+          name: it.name ?? it.item_name ?? "Item",
+          quantity: it.qty ?? it.quantity ?? 1,
+          totalPrice: it.total_price ?? it.totalPrice ?? 0,
+        }))
+      : [{ name: inv.notes || "Wholesale Purchase", quantity: 1, totalPrice: inv.total_amount }];
+
+    openPurchaseBill({
+      billNumber: inv.invoice_number || inv.id.slice(0, 8).toUpperCase(),
+      billDate: inv.invoice_date,
+      supplierName: inv.wholesaler_name,
+      paymentMode: inv.payment_status === "paid" ? "paid in full" : inv.payment_status,
+      paidAmount: inv.paid_amount,
+      items,
+      totalAmount: inv.total_amount,
+      mode,
+      shop: SHOP,
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -113,6 +136,7 @@ export function WholesalerInvoices() {
               <th className="text-right">Due</th>
               <th>Status</th>
               <th>Date</th>
+              <th className="text-right">Bill</th>
             </tr>
           </thead>
           <tbody>
@@ -127,11 +151,21 @@ export function WholesalerInvoices() {
                   <StatusPill status={i.payment_status} />
                 </td>
                 <td className="text-gray-500">{formatDate(i.invoice_date)}</td>
+                <td className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(i, "view")} title="View Bill online">
+                      <Eye size={13} /> View
+                    </button>
+                    <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(i)} title="Print Bill">
+                      <Printer size={13} /> Print
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
             {invoices.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-gray-400">No invoices recorded yet.</td>
+                <td colSpan={8} className="py-8 text-center text-gray-400">No invoices recorded yet.</td>
               </tr>
             )}
           </tbody>

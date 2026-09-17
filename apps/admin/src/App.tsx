@@ -19,6 +19,7 @@ import { ResetPassword } from "./pages/ResetPassword";
 // eager since they're needed for the very first paint regardless of route.
 const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })));
 const Inventory = lazy(() => import("./pages/Inventory").then((m) => ({ default: m.Inventory })));
+const ImeiSearch = lazy(() => import("./pages/ImeiSearch").then((m) => ({ default: m.ImeiSearch })));
 const Sales = lazy(() => import("./pages/Sales").then((m) => ({ default: m.Sales })));
 const Customers = lazy(() => import("./pages/Customers").then((m) => ({ default: m.Customers })));
 const Repairs = lazy(() => import("./pages/Repairs").then((m) => ({ default: m.Repairs })));
@@ -26,8 +27,9 @@ const RepairEnquiries = lazy(() => import("./pages/RepairEnquiries").then((m) =>
 const GiftHampers = lazy(() => import("./pages/GiftHampers").then((m) => ({ default: m.GiftHampers })));
 const WholesalerInvoices = lazy(() => import("./pages/WholesalerInvoices").then((m) => ({ default: m.WholesalerInvoices })));
 const ThirdPartyPurchases = lazy(() => import("./pages/ThirdPartyPurchases").then((m) => ({ default: m.ThirdPartyPurchases })));
-const Emi = lazy(() => import("./pages/Emi").then((m) => ({ default: m.Emi })));
+const Finance = lazy(() => import("./pages/Finance").then((m) => ({ default: m.Finance })));
 const Payments = lazy(() => import("./pages/Payments").then((m) => ({ default: m.Payments })));
+const AllTransactions = lazy(() => import("./pages/AllTransactions").then((m) => ({ default: m.AllTransactions })));
 const Offers = lazy(() => import("./pages/Offers").then((m) => ({ default: m.Offers })));
 const ServiceFeedback = lazy(() => import("./pages/ServiceFeedback").then((m) => ({ default: m.ServiceFeedback })));
 const FinancePartners = lazy(() => import("./pages/FinancePartners").then((m) => ({ default: m.FinancePartners })));
@@ -44,6 +46,7 @@ const Reviews = lazy(() => import("./pages/Reviews").then((m) => ({ default: m.R
 const Brands = lazy(() => import("./pages/Brands").then((m) => ({ default: m.Brands })));
 const ServiceManagement = lazy(() => import("./pages/ServiceManagement").then((m) => ({ default: m.ServiceManagement })));
 const WebOrders = lazy(() => import("./pages/WebOrders").then((m) => ({ default: m.WebOrders })));
+const BackupRestore = lazy(() => import("./pages/BackupRestore").then((m) => ({ default: m.BackupRestore })));
 
 // Staff Portal (role = staff). Its own mobile-first layout, own auth
 // (session token, not Supabase Auth), completely separate route subtree —
@@ -116,6 +119,7 @@ export default function App() {
               >
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/inventory" element={<Inventory />} />
+                <Route path="/imei-search" element={<ImeiSearch />} />
                 <Route path="/sales" element={<Sales />} />
                 <Route path="/web-orders" element={<WebOrders />} />
                 <Route path="/customers" element={<Customers />} />
@@ -129,14 +133,17 @@ export default function App() {
                 <Route path="/services" element={<ServiceManagement />} />
                 <Route path="/wholesaler-invoices" element={<WholesalerInvoices />} />
                 <Route path="/third-party-purchases" element={<ThirdPartyPurchases />} />
-                <Route path="/emi" element={<Emi />} />
+                <Route path="/finance" element={<Finance />} />
+                <Route path="/emi" element={<Navigate to="/finance" replace />} />
                 <Route path="/payments" element={<Payments />} />
+                <Route path="/all-transactions" element={<AllTransactions />} />
                 <Route path="/offers" element={<Offers />} />
                 <Route path="/service-feedback" element={<ServiceFeedback />} />
                 <Route path="/finance-partners" element={<FinancePartners />} />
                 <Route path="/branches" element={<Branches />} />
                 <Route path="/suppliers" element={<Suppliers />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/backup" element={<BackupRestore />} />
                 <Route path="/gallery" element={<Gallery />} />
                 <Route path="/staff" element={<StaffManagement />} />
                 <Route path="/staff-portal" element={<StaffPortal />} />

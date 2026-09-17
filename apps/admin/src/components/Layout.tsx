@@ -28,6 +28,9 @@ import {
   Settings as SettingsIcon,
   Menu,
   X,
+  Search,
+  ArrowLeftRight,
+  DatabaseBackup,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 
@@ -43,8 +46,10 @@ const NAV_GROUPS: {
     label: "Sell",
     items: [
       { to: "/inventory", label: "Inventory", icon: Package },
+      { to: "/imei-search", label: "IMEI / Serial Search", icon: Search },
       { to: "/sales", label: "Sales & Invoices", icon: Receipt },
       { to: "/payments", label: "Payment Management", icon: Wallet },
+      { to: "/all-transactions", label: "All Transactions", icon: ArrowLeftRight },
       { to: "/web-orders", label: "Website Orders", icon: ShoppingBag },
       { to: "/gift-hampers", label: "Gift Hampers", icon: Gift },
       { to: "/brands", label: "Brands", icon: Tag },
@@ -72,7 +77,7 @@ const NAV_GROUPS: {
       { to: "/service-feedback", label: "Service Feedback", icon: Smile },
       { to: "/wholesaler-invoices", label: "Wholesaler Invoices", icon: FileUp },
       { to: "/third-party-purchases", label: "Third-Party Purchases", icon: ShoppingBag },
-      { to: "/emi", label: "EMI / Finance", icon: CreditCard },
+      { to: "/finance", label: "Finance / EMI", icon: CreditCard },
       { to: "/finance-partners", label: "Finance Partners", icon: Handshake },
       { to: "/suppliers", label: "Suppliers", icon: Truck },
       { to: "/branches", label: "Branches", icon: Building2 },
@@ -84,7 +89,10 @@ const NAV_GROUPS: {
   },
   {
     label: "Configuration",
-    items: [{ to: "/settings", label: "Settings", icon: SettingsIcon }],
+    items: [
+      { to: "/settings", label: "Settings", icon: SettingsIcon },
+      { to: "/backup", label: "Backup & Restore", icon: DatabaseBackup },
+    ],
   },
 ];
 
@@ -114,10 +122,16 @@ export function Layout() {
       )}
 
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[82vw] shrink-0 flex-col overflow-hidden bg-sidebar text-sidebarTextMuted transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-sidebar lg:max-w-none lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[260px] max-w-[82vw] shrink-0 flex-col overflow-hidden text-sidebarTextMuted transition-transform duration-200 ease-out lg:static lg:z-auto lg:w-sidebar lg:max-w-none lg:translate-x-0 ${
           navOpen ? "translate-x-0" : "-translate-x-full"
         }`}
+        style={{ background: "linear-gradient(165deg, #2A1420 0%, #1F3A8A 140%)" }}
       >
+        {/* Cream Luxe glossy sheen — a soft top-to-bottom highlight over the wine-to-blue gradient */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: "linear-gradient(180deg, rgba(255,255,255,0.09), transparent 40%)" }}
+        />
         {/* Gold + a hint of brand-blue glow, confined to the header strip —
             jewel tones against the wine base instead of a flat panel. */}
         <div className="pointer-events-none absolute inset-x-0 top-0 h-[150px] overflow-hidden">
@@ -181,15 +195,25 @@ export function Layout() {
                   to={to}
                   end={to === "/"}
                   className={({ isActive }) =>
-                    `flex items-center gap-2 rounded-md border-l-2 px-2 py-2 text-sm transition-colors lg:py-1.5 ${
+                    `relative flex items-center gap-2 overflow-hidden rounded-md border-l-2 px-2 py-2 text-sm transition-colors lg:py-1.5 ${
                       isActive
-                        ? "border-gold bg-gold/10 font-medium text-gold"
+                        ? "border-transparent font-semibold text-sidebar shadow-[0_6px_14px_-4px_rgba(201,151,90,0.6)]"
                         : "border-transparent text-sidebarTextMuted hover:bg-sidebarHover hover:text-white"
                     }`
                   }
+                  style={({ isActive }) =>
+                    isActive ? { background: "linear-gradient(180deg, #E3B876, #C9975A)" } : undefined
+                  }
                 >
-                  <Icon size={16} />
-                  {label}
+                  {({ isActive }) => (
+                    <>
+                      {isActive && (
+                        <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-md bg-gradient-to-b from-white/40 to-transparent" />
+                      )}
+                      <Icon size={16} className="relative" />
+                      <span className="relative">{label}</span>
+                    </>
+                  )}
                 </NavLink>
               ))}
             </div>
@@ -206,7 +230,10 @@ export function Layout() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-topbar shrink-0 items-center justify-between gap-3 border-b border-border bg-card px-4 sm:px-5">
+        <header
+          className="flex h-topbar shrink-0 items-center justify-between gap-3 border-b border-border px-4 sm:px-5"
+          style={{ background: "linear-gradient(180deg, #FFFFFF, #FBF7F2)" }}
+        >
           <div className="flex min-w-0 items-center gap-2">
             <button
               onClick={() => setNavOpen(true)}
@@ -217,7 +244,10 @@ export function Layout() {
             </button>
             <div className="truncate font-serif text-sm font-medium text-gray-700">Admin Portal</div>
           </div>
-          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand-primary/10 text-xs font-semibold text-brand-primary">
+          <div
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow-sm"
+            style={{ background: "linear-gradient(155deg, #2A1420, #1F3A8A)", color: "#F5D9A8" }}
+          >
             SC
           </div>
         </header>

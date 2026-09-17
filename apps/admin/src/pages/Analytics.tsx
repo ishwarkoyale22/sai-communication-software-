@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from "recharts";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, CartesianGrid } from "recharts";
+import { TrendingUp, Package, PieChart, Trophy } from "lucide-react";
 import { formatCurrency } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 
@@ -89,56 +90,108 @@ export function Analytics() {
     }, {})
   );
 
+  const tooltipStyle = {
+    borderRadius: 10,
+    border: "1px solid #EADFCB",
+    boxShadow: "0 12px 24px -12px rgba(27,27,27,0.25)",
+    fontSize: 12,
+  };
+
   return (
     <div className="space-y-5">
-      <h1 className="text-lg font-semibold text-gray-800">Analytics</h1>
+      <div>
+        <h1 className="font-serif text-xl font-semibold text-gray-800">Analytics</h1>
+        <p className="text-xs text-gray-500">A glance at revenue, top movers, and who's driving them.</p>
+      </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="card p-4">
-          <div className="mb-2 text-sm font-semibold text-gray-700">Revenue Trend</div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="card-blue p-4">
+          <div className="mb-2 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <TrendingUp size={15} className="text-brand-primary" />
+            Revenue Trend
+          </div>
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={byDay}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#F1F3F5" />
+            <AreaChart data={byDay}>
+              <defs>
+                <linearGradient id="revenueTrendFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#1F3A8A" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="#1F3A8A" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#D9E2F5" vertical={false} />
               <XAxis dataKey="date" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-              <Line type="monotone" dataKey="revenue" stroke="#2563EB" strokeWidth={2} dot={false} />
-            </LineChart>
+              <Tooltip formatter={(v) => formatCurrency(Number(v))} contentStyle={tooltipStyle} />
+              <Area type="monotone" dataKey="revenue" stroke="#1F3A8A" strokeWidth={2.5} fill="url(#revenueTrendFill)" dot={false} />
+            </AreaChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="card p-4">
-          <div className="mb-2 text-sm font-semibold text-gray-700">Top Products by Revenue</div>
+        <div className="card-gold p-4">
+          <div className="mb-2 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <Package size={15} className="text-gold" />
+            Top Products by Revenue
+          </div>
           <ResponsiveContainer width="100%" height={220}>
-            <BarChart data={byProduct} layout="vertical">
+            <BarChart data={byProduct} layout="vertical" margin={{ left: 8 }}>
+              <defs>
+                <linearGradient id="topProductsFill" x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="0%" stopColor="#E3B876" />
+                  <stop offset="100%" stopColor="#C9975A" />
+                </linearGradient>
+              </defs>
               <XAxis type="number" tick={{ fontSize: 10 }} />
-              <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={100} />
-              <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-              <Bar dataKey="revenue" fill="#2563EB" radius={[0, 4, 4, 0]} />
+              <YAxis
+                type="category"
+                dataKey="name"
+                tick={{ fontSize: 10 }}
+                width={110}
+                tickFormatter={(v: string) => (v.length > 16 ? `${v.slice(0, 16)}…` : v)}
+              />
+              <Tooltip formatter={(v) => formatCurrency(Number(v))} contentStyle={tooltipStyle} />
+              <Bar dataKey="revenue" fill="url(#topProductsFill)" radius={[0, 6, 6, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="card p-4">
-          <div className="mb-2 text-sm font-semibold text-gray-700">Revenue by Category</div>
+        <div className="card-green p-4">
+          <div className="mb-2 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <PieChart size={15} className="text-brand-success" />
+            Revenue by Category
+          </div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={byCategory}>
+              <defs>
+                <linearGradient id="categoryFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#34A374" />
+                  <stop offset="100%" stopColor="#0F7A54" />
+                </linearGradient>
+              </defs>
               <XAxis dataKey="category" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-              <Bar dataKey="revenue" fill="#16A34A" radius={[4, 4, 0, 0]} />
+              <Tooltip formatter={(v) => formatCurrency(Number(v))} contentStyle={tooltipStyle} />
+              <Bar dataKey="revenue" fill="url(#categoryFill)" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>
 
-        <div className="card p-4">
-          <div className="mb-2 text-sm font-semibold text-gray-700">Staff Performance (Sales Volume)</div>
+        <div className="card-purple p-4">
+          <div className="mb-2 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <Trophy size={15} className="text-purple-600" />
+            Staff Performance (Sales Volume)
+          </div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={byStaff}>
+              <defs>
+                <linearGradient id="staffFill" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#A78BD9" />
+                  <stop offset="100%" stopColor="#7C5BC4" />
+                </linearGradient>
+              </defs>
               <XAxis dataKey="name" tick={{ fontSize: 10 }} />
               <YAxis tick={{ fontSize: 10 }} />
-              <Tooltip formatter={(v) => formatCurrency(Number(v))} />
-              <Bar dataKey="revenue" fill="#D97706" radius={[4, 4, 0, 0]} />
+              <Tooltip formatter={(v) => formatCurrency(Number(v))} contentStyle={tooltipStyle} />
+              <Bar dataKey="revenue" fill="url(#staffFill)" radius={[6, 6, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

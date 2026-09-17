@@ -1,0 +1,15 @@
+-- 0031_finance_module.sql enabled RLS and added a policy on
+-- finance_transactions, but never issued a table-level GRANT — unlike
+-- finance_partners (already granted in 0022) and finance_status_history
+-- (granted within 0031 itself). Without a GRANT, Postgres denies anon AND
+-- authenticated before RLS is even evaluated, so no one — not even a
+-- logged-in admin — could read or write finance_transactions through the
+-- app (confirmed live: PostgREST returned "permission denied for table
+-- finance_transactions" for a simple SELECT).
+--
+-- DELETE is deliberately left out of this grant — Phase 12 says financial
+-- history is never deleted, only superseded via status changes, so that's
+-- enforced here at the grant level too, not just by app convention. The
+-- existing "for all" RLS policy on this table becomes a no-op for DELETE
+-- as a result (no role has DELETE privilege to even reach it).
+grant select, insert, update on public.finance_transactions to anon, authenticated;

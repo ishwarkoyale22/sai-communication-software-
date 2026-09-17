@@ -19,20 +19,20 @@ function workedHours(clockIn: string, asOf: number) {
 }
 
 const STATS = [
-  { key: "clients" as const, label: "Clients", icon: Users, color: "text-gold" },
-  { key: "reports" as const, label: "Reports", icon: FileText, color: "text-brand-primary" },
-  { key: "pendingTasks" as const, label: "Pending Tasks", icon: ListChecks, color: "text-gold" },
-  { key: "followUps" as const, label: "Follow-ups", icon: CalendarClock, color: "text-brand-primary" },
+  { key: "clients" as const, label: "Clients", icon: Users, color: "text-gold", tile: "card-gold" },
+  { key: "reports" as const, label: "Reports", icon: FileText, color: "text-brand-primary", tile: "card-blue" },
+  { key: "pendingTasks" as const, label: "Pending Tasks", icon: ListChecks, color: "text-gold", tile: "card-amber" },
+  { key: "followUps" as const, label: "Follow-ups", icon: CalendarClock, color: "text-brand-primary", tile: "card-blue" },
 ];
 
 const LINKS = [
-  { to: "/portal/clients", label: "Clients", icon: Users },
-  { to: "/portal/reports", label: "Reports", icon: FileText },
-  { to: "/portal/tasks", label: "Tasks", icon: ListChecks },
-  { to: "/portal/repairs", label: "My Repairs", icon: Wrench },
-  { to: "/portal/follow-ups", label: "Follow-ups", icon: CalendarClock },
-  { to: "/portal/leave", label: "Leave", icon: CalendarDays },
-  { to: "/portal/reviews", label: "Reviews", icon: Star },
+  { to: "/portal/clients", label: "Clients", icon: Users, tile: "card-gold", iconColor: "text-gold" },
+  { to: "/portal/reports", label: "Reports", icon: FileText, tile: "card-blue", iconColor: "text-brand-primary" },
+  { to: "/portal/tasks", label: "Tasks", icon: ListChecks, tile: "card-amber", iconColor: "text-amber-600" },
+  { to: "/portal/repairs", label: "My Repairs", icon: Wrench, tile: "card-purple", iconColor: "text-purple-600" },
+  { to: "/portal/follow-ups", label: "Follow-ups", icon: CalendarClock, tile: "card-blue", iconColor: "text-brand-primary" },
+  { to: "/portal/leave", label: "Leave", icon: CalendarDays, tile: "card-green", iconColor: "text-brand-success" },
+  { to: "/portal/reviews", label: "Reviews", icon: Star, tile: "card-gold", iconColor: "text-gold" },
 ];
 
 export function Home() {
@@ -104,13 +104,13 @@ export function Home() {
 
       <div className="grid grid-cols-2 gap-3">
         {STATS.map((s) => (
-          <div key={s.key} className="card p-3">
+          <div key={s.key} className={`${s.tile} p-3`}>
             <div className="flex items-start justify-between">
               <div>
                 <div className="font-serif text-2xl font-semibold text-gray-800">{counts[s.key]}</div>
                 <div className="text-xs text-gray-500">{s.label}</div>
               </div>
-              <div className={`flex h-8 w-8 items-center justify-center rounded-lg border border-border ${s.color}`}>
+              <div className={`flex h-8 w-8 items-center justify-center rounded-lg border border-border bg-white/60 ${s.color}`}>
                 <s.icon size={15} strokeWidth={1.75} />
               </div>
             </div>
@@ -119,13 +119,13 @@ export function Home() {
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        {LINKS.map(({ to, label, icon: Icon }) => (
+        {LINKS.map(({ to, label, icon: Icon, tile, iconColor }) => (
           <Link
             key={to}
             to={to}
-            className="card flex flex-col items-center justify-center gap-2 p-3 transition-all hover:-translate-y-0.5 hover:border-gold hover:shadow-cardHover"
+            className={`${tile} flex flex-col items-center justify-center gap-2 p-3 transition-all hover:-translate-y-0.5 hover:shadow-cardHover`}
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-accent text-brand-primary">
+            <div className={`flex h-9 w-9 items-center justify-center rounded-full bg-white/70 ${iconColor}`}>
               <Icon size={17} strokeWidth={1.75} />
             </div>
             <span className="text-center text-[11px] font-medium text-gray-700">{label}</span>

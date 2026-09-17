@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
@@ -129,8 +130,8 @@ export function StaffManagement() {
   }
 
   async function deleteStaff(s: Staff) {
-    if (!confirm(`Are you sure you want to deactivate or remove "${s.name}"?`)) return;
-    const { error: delErr } = await supabase.from("staff").delete().eq("id", s.id);
+    if (!confirm(`Are you sure you want to deactivate or remove "${s.name}"? A removed staff member can be restored from the Recycle Bin.`)) return;
+    const { error: delErr } = await softDelete(supabase, "staff", s.id, s.name);
     if (delErr) await supabase.from("staff").update({ is_active: false }).eq("id", s.id);
     setSuccess(`"${s.name}" removed.`);
     setTimeout(() => setSuccess(null), 4000);

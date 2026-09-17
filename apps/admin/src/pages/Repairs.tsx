@@ -17,6 +17,14 @@ import { LayoutGrid, List, Plus, PhoneCall } from "lucide-react";
 const REPAIR_STATUSES = ["received", "in_progress", "waiting_parts", "ready", "completed"] as const;
 type RepairStatus = (typeof REPAIR_STATUSES)[number];
 
+const STATUS_TILE: Record<RepairStatus, string> = {
+  received: "card-blue",
+  in_progress: "card-amber",
+  waiting_parts: "card-red",
+  ready: "card-green",
+  completed: "card-purple",
+};
+
 const STATUS_LABEL: Record<string, string> = {
   received: "Submitted / Pending",
   in_progress: "In Process",
@@ -162,7 +170,7 @@ export function Repairs() {
       {view === "kanban" ? (
         <div className="grid grid-cols-5 gap-3">
           {REPAIR_STATUSES.map((status) => (
-            <div key={status} className="rounded-card bg-gray-100 p-2">
+            <div key={status} className={`${STATUS_TILE[status]} p-2`}>
               <div className="mb-2 px-1 text-xs font-semibold uppercase text-gray-500">
                 {STATUS_LABEL[status]} ({repairs.filter((r) => r.status === status).length})
               </div>

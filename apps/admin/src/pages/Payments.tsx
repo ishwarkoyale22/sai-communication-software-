@@ -30,7 +30,7 @@ export function Payments() {
       .channel("payments-page")
       .on("postgres_changes", { event: "*", schema: "public", table: "sales" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "website_orders" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "emi_finance" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "finance_transactions" }, load)
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -41,7 +41,7 @@ export function Payments() {
     const [{ data: sales }, { data: orders }, { data: emi }] = await Promise.all([
       supabase.from("sales").select("id, invoice_number, customer_name, final_amount, payment_method, created_at"),
       supabase.from("website_orders").select("id, order_number, customer_name, total_amount, payment_method, created_at"),
-      supabase.from("emi_finance").select("id, product_name, customer_name, loan_amount, start_date"),
+      supabase.from("finance_transactions").select("id, product_name, customer_name, finance_amount, finance_date"),
     ]);
 
     const combined: PaymentRow[] = [
@@ -64,13 +64,13 @@ export function Payments() {
         createdAt: o.created_at,
       })),
       ...((emi ?? []) as any[]).map((e) => ({
-        id: `emi-${e.id}`,
+        id: `finance-${e.id}`,
         source: "Finance/EMI" as const,
         reference: e.product_name,
         customerName: e.customer_name,
-        amount: Number(e.loan_amount ?? 0),
+        amount: Number(e.finance_amount ?? 0),
         paymentMethod: "emi",
-        createdAt: e.start_date,
+        createdAt: e.finance_date,
       })),
     ].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 
@@ -118,12 +118,16 @@ export function Payments() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {(Object.entries(split.byMode) as [string, number][])
           .filter(([mode]) => mode !== "Other" || split.byMode.Other > 0)
-          .map(([mode, amount]) => (
-            <div key={mode} className="card p-4">
-              <div className="text-xs font-medium text-gray-500">{mode}</div>
-              <div className="mt-1 font-serif text-xl font-semibold text-gray-800">{formatCurrency(amount)}</div>
-            </div>
-          ))}
+          .map(([mode, amount]) => {
+            const tile =
+              mode === "UPI" ? "card-blue" : mode === "Cash" ? "card-green" : mode === "Card" ? "card-gold" : mode === "Finance/EMI" ? "card-purple" : "card";
+            return (
+              <div key={mode} className={`${tile} p-4`}>
+                <div className="text-xs font-medium text-gray-500">{mode}</div>
+                <div className="mt-1 font-serif text-xl font-semibold text-gray-800">{formatCurrency(amount)}</div>
+              </div>
+            );
+          })}
       </div>
 
       <div className="card overflow-x-auto">

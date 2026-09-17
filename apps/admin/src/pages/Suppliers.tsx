@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
@@ -95,8 +96,8 @@ export function Suppliers() {
   }
 
   async function remove(s: Supplier) {
-    if (!confirm(`Delete supplier "${s.name}"?`)) return;
-    const { error: delErr } = await supabase.from("suppliers").delete().eq("id", s.id);
+    if (!confirm(`Delete supplier "${s.name}"? You can restore it from the Recycle Bin afterwards.`)) return;
+    const { error: delErr } = await softDelete(supabase, "suppliers", s.id, s.name);
     if (delErr) await supabase.from("suppliers").update({ is_active: false }).eq("id", s.id);
     load();
   }

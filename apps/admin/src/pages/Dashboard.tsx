@@ -30,6 +30,11 @@ interface InventoryRow {
   stock: number;
   created_at: string;
 }
+interface FinanceRow {
+  id: string;
+  finance_amount: number;
+  finance_date: string;
+}
 interface RepairRow {
   id: string;
   status: string;
@@ -63,6 +68,12 @@ const REPAIR_STATUS_LABEL: Record<string, string> = {
   completed: "Completed",
 };
 const OPEN_REPAIR_STATUSES = ["received", "in_progress", "waiting_parts", "ready"];
+const REPAIR_STATUS_TILE: Record<string, string> = {
+  received: "card-blue",
+  in_progress: "card-amber",
+  waiting_parts: "card-red",
+  ready: "card-green",
+};
 
 function periodStart(period: "day" | "week" | "month" | "year"): Date {
   const d = new Date();
@@ -87,7 +98,7 @@ export function Dashboard() {
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItemRow[]>([]);
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
-  const [emiTotal, setEmiTotal] = useState(0);
+  const [financeTransactions, setFinanceTransactions] = useState<FinanceRow[]>([]);
   const [pendingRepairEnquiries, setPendingRepairEnquiries] = useState(0);
   const [pendingWebsiteOrders, setPendingWebsiteOrders] = useState(0);
   const [recentOrders, setRecentOrders] = useState<RecentOrder[]>([]);
@@ -108,7 +119,7 @@ export function Dashboard() {
       .on("postgres_changes", { event: "*", schema: "public", table: "repair_enquiries" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "repairs" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "inventory" }, load)
-      .on("postgres_changes", { event: "*", schema: "public", table: "emi_finance" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "finance_transactions" }, load)
       .on("postgres_changes", { event: "*", schema: "public", table: "sales_targets" }, load)
       .subscribe();
     return () => {
@@ -127,7 +138,7 @@ export function Dashboard() {
       { data: allSales },
       { data: items },
       { data: inv },
-      { data: emiRows },
+      { data: financeRows },
       { count: pendingRepairEnq },
       { count: pendingOrders },
       { data: orders },
@@ -138,7 +149,7 @@ export function Dashboard() {
       supabase.from("sales").select("id, final_amount, payment_method, staff_id, created_at").gte("created_at", yearAgo.toISOString()),
       supabase.from("sales_items").select("sale_id, inventory_id, item_name, quantity, total_price"),
       supabase.from("inventory").select("id, name, category, price, cost_price, stock, created_at").eq("is_active", true),
-      supabase.from("emi_finance").select("loan_amount").eq("status", "active"),
+      supabase.from("finance_transactions").select("id, finance_amount, finance_date").gte("finance_date", yearAgo.toISOString().slice(0, 10)),
       supabase.from("repair_enquiries").select("id", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("website_orders").select("id", { count: "exact", head: true }).eq("order_status", "pending"),
       supabase.from("website_orders").select("id, order_number, customer_name, total_amount, order_status, created_at").order("created_at", { ascending: false }).limit(5),
@@ -150,7 +161,7 @@ export function Dashboard() {
     setSales((allSales as SaleRow[]) ?? []);
     setSaleItems((items as SaleItemRow[]) ?? []);
     setInventory((inv as InventoryRow[]) ?? []);
-    setEmiTotal(((emiRows ?? []) as { loan_amount: number }[]).reduce((s, r) => s + Number(r.loan_amount ?? 0), 0));
+    setFinanceTransactions((financeRows as FinanceRow[]) ?? []);
     setPendingRepairEnquiries(pendingRepairEnq ?? 0);
     setPendingWebsiteOrders(pendingOrders ?? 0);
     setRecentOrders((orders as RecentOrder[]) ?? []);
@@ -194,9 +205,21 @@ export function Dashboard() {
     return profit;
   }, [periodItems, inventoryById]);
 
+  // finance_date is a plain `date` column (no time component) — compare as
+  // a date-only string against the period boundary rather than mixing it
+  // with periodStart's full ISO timestamp, which would wrongly exclude a
+  // finance sale dated exactly on the boundary day (a bare "2026-09-17"
+  // sorts before "2026-09-17T00:00:00.000Z" lexicographically).
+  const periodFinanceTotal = useMemo(() => {
+    const start = periodStart(period).toISOString().slice(0, 10);
+    return financeTransactions
+      .filter((f) => f.finance_date >= start)
+      .reduce((sum, f) => sum + Number(f.finance_amount ?? 0), 0);
+  }, [financeTransactions, period]);
+
   const paymentSplit = useMemo(
-    () => computePaymentSplit(periodSales.map((s) => ({ amount: s.final_amount, paymentMethod: s.payment_method })), period === "year" ? emiTotal : 0),
-    [periodSales, emiTotal, period]
+    () => computePaymentSplit(periodSales.map((s) => ({ amount: s.final_amount, paymentMethod: s.payment_method })), periodFinanceTotal),
+    [periodSales, periodFinanceTotal]
   );
 
   const topProducts = useMemo(() => {
@@ -425,7 +448,7 @@ export function Dashboard() {
           </table>
         </div>
 
-        <div className="card p-4">
+        <div className="card-gold p-4">
           <div className="mb-3 font-serif text-sm font-semibold text-gray-700">Inventory Health</div>
           <div className="mb-3 flex items-center justify-between text-sm">
             <span className="text-gray-600">Live stock value</span>
@@ -517,7 +540,7 @@ export function Dashboard() {
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {OPEN_REPAIR_STATUSES.map((s) => (
-              <div key={s} className="rounded-lg border border-border p-2.5 text-center">
+              <div key={s} className={`${REPAIR_STATUS_TILE[s]} p-2.5 text-center`}>
                 <div className="font-serif text-xl font-semibold text-gray-800">{repairFunnel[s] ?? 0}</div>
                 <div className="mt-0.5 text-[10px] uppercase tracking-wide text-gray-500">{REPAIR_STATUS_LABEL[s]}</div>
               </div>
@@ -525,7 +548,7 @@ export function Dashboard() {
           </div>
         </div>
 
-        <div className="card p-4">
+        <div className="card-gold p-4">
           <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
             <Wrench size={15} className="text-gold" />
             Technician Efficiency
@@ -579,7 +602,7 @@ export function Dashboard() {
           </ul>
         </div>
 
-        <div className="card p-4">
+        <div className="card-blue p-4">
           <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
             <Target size={15} className="text-brand-primary" />
             Target Progress
@@ -662,7 +685,13 @@ export function Dashboard() {
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {secondaryCards.map((c) => (
-          <Link key={c.label} to={c.to} className="card flex items-center justify-between p-3 transition-shadow hover:shadow-cardHover">
+          <Link
+            key={c.label}
+            to={c.to}
+            className={`flex items-center justify-between p-3 transition-shadow hover:shadow-cardHover ${
+              c.iconColor === "text-gold" ? "card-gold" : c.iconColor === "text-brand-primary" ? "card-blue" : "card"
+            }`}
+          >
             <span className="text-sm text-gray-600">{c.label}</span>
             <span className="flex items-center gap-2 font-serif text-lg font-semibold text-gray-800">
               {c.value}

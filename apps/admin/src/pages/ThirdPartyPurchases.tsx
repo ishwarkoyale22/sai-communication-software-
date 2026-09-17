@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { formatCurrency, formatDate } from "@sai/shared";
-import { supabase } from "../lib/supabase";
+import { formatCurrency, formatDate, openPurchaseBill } from "@sai/shared";
+import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
-import { Plus } from "lucide-react";
+import { Plus, Printer, Eye } from "lucide-react";
 
 interface ThirdPartyPurchase {
   id: string;
@@ -54,6 +54,20 @@ export function ThirdPartyPurchases() {
     load();
   }
 
+  function printBill(p: ThirdPartyPurchase, mode: "print" | "view" = "print") {
+    openPurchaseBill({
+      billNumber: `TPP-${p.id.slice(0, 8).toUpperCase()}`,
+      billDate: p.purchase_date,
+      supplierName: p.vendor_name,
+      paymentMode: "cash",
+      paidAmount: p.total_price,
+      items: [{ name: p.item_name, quantity: p.quantity, totalPrice: p.total_price }],
+      totalAmount: p.total_price,
+      shop: SHOP,
+      mode,
+    });
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -79,6 +93,7 @@ export function ThirdPartyPurchases() {
               <th className="text-right">Qty</th>
               <th className="text-right">Total</th>
               <th>Date</th>
+              <th className="text-right">Bill</th>
             </tr>
           </thead>
           <tbody>
@@ -89,11 +104,21 @@ export function ThirdPartyPurchases() {
                 <td className="text-right">{r.quantity}</td>
                 <td className="text-right">{formatCurrency(r.total_price)}</td>
                 <td className="text-gray-500">{formatDate(r.purchase_date)}</td>
+                <td className="text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(r, "view")} title="View Bill online">
+                      <Eye size={13} /> View
+                    </button>
+                    <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(r)} title="Print Bill">
+                      <Printer size={13} /> Print
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="py-8 text-center text-gray-400">No purchases logged</td>
+                <td colSpan={6} className="py-8 text-center text-gray-400">No purchases logged</td>
               </tr>
             )}
           </tbody>
