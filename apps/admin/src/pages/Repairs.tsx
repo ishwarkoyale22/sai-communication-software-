@@ -4,6 +4,7 @@ import { formatCurrency, formatDateTime, type Customer, type Staff } from "@sai/
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
+import { repairEnquiryStatusFor } from "../lib/repairEnquiryStatus";
 import { LayoutGrid, List, Plus, PhoneCall } from "lucide-react";
 
 // Underlying values are unchanged (received/in_progress/waiting_parts/ready/
@@ -105,6 +106,23 @@ export function Repairs() {
       .from("repairs")
       .update({ status, completed_at: status === "completed" ? new Date().toISOString() : null })
       .eq("id", id);
+
+    // Mirror progress onto the originating website enquiry, if any, so the
+    // public Track Repair page (repair-track.tsx on the customer site —
+    // reads repair_enquiries.status only) shows real progress instead of
+    // staying stuck at whatever it was when the enquiry first came in.
+    // repair_enquiries.status has its own DB check constraint that only
+    // allows pending/contacted/completed/cancelled (not this page's
+    // received/in_progress/waiting_parts/ready/completed) — see
+    // repairEnquiryStatusFor for the mapping.
+    const enquiryId = repairs.find((r) => r.id === id)?.enquiry_id;
+    if (enquiryId) {
+      const { error } = await supabase
+        .from("repair_enquiries")
+        .update({ status: repairEnquiryStatusFor(status) })
+        .eq("id", enquiryId);
+      if (error) console.error("[repairs] failed to sync enquiry status:", error.message);
+    }
   }
 
   async function assignTechnician(id: string, technicianId: string) {

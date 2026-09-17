@@ -87,6 +87,14 @@ export function Offers() {
       setError("Coupon code is required for a Coupon Code offer.");
       return;
     }
+    if (form.offer_type === "coupon" && !form.discount_value) {
+      // Checkout (checkout.tsx) reads this coupon's discount_value as a flat
+      // ₹ amount off the order total — a coupon saved without one applies
+      // successfully at checkout but grants ₹0 off, silently. See the "Apply"
+      // flow's discountAmount calc, which falls back to 0 when this is null.
+      setError("Discount amount is required for a Coupon Code offer.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -173,6 +181,7 @@ export function Offers() {
               {o.offer_type === "coupon" && o.coupon_code && (
                 <span className="font-mono font-semibold text-brand-primary">{o.coupon_code}</span>
               )}
+              {o.offer_type === "coupon" && o.discount_value != null && <span>₹{o.discount_value} off</span>}
               <span className="capitalize text-gray-400">{(o.display_mode ?? "hero_banner").replace("_", " ")}</span>
             </div>
             <div className="mt-3 flex justify-end gap-1">
@@ -206,11 +215,17 @@ export function Offers() {
               ))}
             </select>
 
-            {form.offer_type !== "bogo" && form.offer_type !== "coupon" && (
+            {form.offer_type !== "bogo" && (
               <input
                 type="number"
                 className="input"
-                placeholder={form.offer_type === "percentage" ? "Discount % (e.g. 10)" : "Rupees off (e.g. 500)"}
+                placeholder={
+                  form.offer_type === "percentage"
+                    ? "Discount % (e.g. 10)"
+                    : form.offer_type === "coupon"
+                      ? "Coupon discount, ₹ off (e.g. 500) *"
+                      : "Rupees off (e.g. 500)"
+                }
                 value={form.discount_value || ""}
                 onChange={(e) => setForm({ ...form, discount_value: Number(e.target.value) })}
               />

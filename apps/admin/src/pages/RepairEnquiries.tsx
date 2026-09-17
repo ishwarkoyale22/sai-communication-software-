@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
 import { supabase } from "../lib/supabase";
+import { repairEnquiryStatusFor } from "../lib/repairEnquiryStatus";
 import { ArrowRight, Wrench } from "lucide-react";
 
 interface RepairEnquiry {
@@ -90,6 +91,16 @@ export function RepairEnquiries() {
 
       if (data) {
         setRepairsByEnquiry((prev) => ({ ...prev, [enquiry.id]: data as LinkedRepair }));
+        // Keep the enquiry's own status in step with the repair job so the
+        // customer-facing Track Repair page (which only reads
+        // repair_enquiries.status) reflects real progress instead of
+        // staying frozen at whatever it was when first submitted. See
+        // repairEnquiryStatusFor for why this isn't just "received".
+        const { error: syncErr } = await supabase
+          .from("repair_enquiries")
+          .update({ status: repairEnquiryStatusFor("received") })
+          .eq("id", enquiry.id);
+        if (syncErr) console.error("[repair-enquiries] failed to sync enquiry status:", syncErr.message);
       }
     } catch (err: any) {
       setError(err?.message || "Failed to create repair. Please try again.");

@@ -25,6 +25,7 @@ import {
   Truck,
   Building2,
   Image,
+  Cake,
   Settings as SettingsIcon,
   Menu,
   X,
@@ -62,6 +63,7 @@ const NAV_GROUPS: {
     label: "People",
     items: [
       { to: "/customers", label: "Customers", icon: Users },
+      { to: "/birthdays", label: "Birthday Reminders", icon: Cake },
       { to: "/enquiries", label: "Enquiries", icon: MessageSquareText },
       { to: "/client-reports", label: "Client Reports", icon: FileText },
       { to: "/reviews", label: "Reviews", icon: Star },

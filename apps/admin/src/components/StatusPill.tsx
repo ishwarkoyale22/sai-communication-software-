@@ -9,5 +9,5 @@ const TONE_CLASS: Record<string, string> = {
 };
 
 export function StatusPill({ status, label }: { status: string | null | undefined; label?: string }) {
-  return <span className={TONE_CLASS[statusTone(status)]}>{label ?? status ?? "-"}</span>;
+  return <span className={TONE_CLASS[statusTone(status)]}>{label ?? status ?? "—"}</span>;
 }

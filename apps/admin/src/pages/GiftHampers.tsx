@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { formatCurrency, softDelete } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
-import { Plus, Trash2, X, Package } from "lucide-react";
+import { Plus, Trash2, X, Package, Tag } from "lucide-react";
 
 interface HamperItem {
   id: string;
@@ -12,6 +12,7 @@ interface HamperItem {
   image: string | null;
   stock: number;
   is_active: boolean;
+  offer_id: string | null;
 }
 
 interface InventoryOption {
@@ -19,6 +20,9 @@ interface InventoryOption {
   name: string;
   model: string;
   price: number;
+  brand_id: string | null;
+  stock: number;
+  is_active: boolean;
 }
 
 interface HamperProduct {
@@ -28,17 +32,42 @@ interface HamperProduct {
   quantity: number;
 }
 
+interface Brand {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
+
+interface OfferOption {
+  id: string;
+  title: string;
+  offer_type: string;
+  discount_value: number | null;
+  coupon_code: string | null;
+  is_active: boolean;
+}
+
 const emptyForm = { name: "", category: "", price: 0, stock: 0 };
 const MAX_PRODUCTS_PER_HAMPER = 5;
+
+function offerLabel(o: OfferOption) {
+  if (o.offer_type === "percentage" && o.discount_value != null) return `${o.title} (${o.discount_value}% off)`;
+  if (o.offer_type === "rupee_off" && o.discount_value != null) return `${o.title} (₹${o.discount_value} off)`;
+  if (o.offer_type === "coupon" && o.coupon_code) return `${o.title} (code ${o.coupon_code})`;
+  return o.title;
+}
 
 export function GiftHampers() {
   const [hampers, setHampers] = useState<HamperItem[]>([]);
   const [inventory, setInventory] = useState<InventoryOption[]>([]);
   const [products, setProducts] = useState<HamperProduct[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [offers, setOffers] = useState<OfferOption[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [managing, setManaging] = useState<HamperItem | null>(null);
+  const [pickBrand, setPickBrand] = useState("");
   const [pickId, setPickId] = useState("");
   const [pickQty, setPickQty] = useState(1);
 
@@ -55,14 +84,21 @@ export function GiftHampers() {
   }, []);
 
   async function load() {
-    const [{ data: h }, { data: inv }, { data: hp }] = await Promise.all([
+    const [{ data: h }, { data: inv }, { data: hp }, { data: br }, { data: off }] = await Promise.all([
       supabase.from("hamper_items").select("*").order("name"),
-      supabase.from("inventory").select("id, name, model, price").eq("is_active", true).order("name"),
+      // Not filtered to is_active here (unlike before) — the picker needs to
+      // show inactive/out-of-stock products too, so it can label them
+      // "Unavailable" instead of just silently hiding them.
+      supabase.from("inventory").select("id, name, model, price, brand_id, stock, is_active").order("name"),
       supabase.from("hamper_products").select("id, hamper_id, inventory_id, quantity"),
+      supabase.from("brands").select("id, name, is_active").order("name"),
+      supabase.from("offers").select("id, title, offer_type, discount_value, coupon_code, is_active").eq("is_active", true).order("title"),
     ]);
     setHampers((h as HamperItem[]) ?? []);
     setInventory((inv as InventoryOption[]) ?? []);
     setProducts((hp as HamperProduct[]) ?? []);
+    setBrands((br as Brand[]) ?? []);
+    setOffers((off as OfferOption[]) ?? []);
   }
 
   function productsFor(hamperId: string) {
@@ -77,6 +113,19 @@ export function GiftHampers() {
       const item = inventory.find((i) => i.id === p.inventory_id);
       return sum + (item?.price ?? 0) * p.quantity;
     }, 0);
+  }
+  function brandName(id: string | null) {
+    return brands.find((b) => b.id === id)?.name ?? "-";
+  }
+  function offerFor(hamper: HamperItem) {
+    return offers.find((o) => o.id === hamper.offer_id) ?? null;
+  }
+  function isAvailable(item: InventoryOption) {
+    return item.is_active && item.stock > 0;
+  }
+  async function setHamperOffer(hamper: HamperItem, offerId: string) {
+    await supabase.from("hamper_items").update({ offer_id: offerId || null }).eq("id", hamper.id);
+    load();
   }
 
   async function addHamper() {
@@ -116,6 +165,11 @@ export function GiftHampers() {
       setError(`A gift hamper can contain at most ${MAX_PRODUCTS_PER_HAMPER} products.`);
       return;
     }
+    const item = inventory.find((i) => i.id === pickId);
+    if (item && !isAvailable(item)) {
+      setError(`${item.name} ${item.model} is currently unavailable (out of stock or inactive) — pick an available product instead.`);
+      return;
+    }
     setError(null);
     const { error: insertErr } = await supabase
       .from("hamper_products")
@@ -147,6 +201,7 @@ export function GiftHampers() {
               Stock: h.stock,
               Products: productsFor(h.id).map((p) => `${inventoryName(p.inventory_id)} x${p.quantity}`).join("; "),
               "Bundle Value": bundleValue(h.id),
+              Offer: offerFor(h) ? offerLabel(offerFor(h)!) : "-",
               Active: h.is_active ? "Yes" : "No",
             }))}
             fileName="gift-hampers"
@@ -173,6 +228,11 @@ export function GiftHampers() {
               <span className="pill-info">Stock: {h.stock}</span>
               <span className="font-semibold text-brand-primary">{formatCurrency(h.price)}</span>
             </div>
+            {offerFor(h) && (
+              <div className="mt-2 flex items-center gap-1 text-xs font-medium text-brand-success">
+                <Tag size={11} /> {offerLabel(offerFor(h)!)}
+              </div>
+            )}
             <div className="mt-2 space-y-0.5 text-xs text-gray-500">
               {productsFor(h.id).map((p) => (
                 <div key={p.id} className="flex justify-between">
@@ -192,6 +252,8 @@ export function GiftHampers() {
                 className="btn-secondary !py-0.5 text-xs"
                 onClick={() => {
                   setError(null);
+                  setPickBrand("");
+                  setPickId("");
                   setManaging(h);
                 }}
               >
@@ -263,25 +325,44 @@ export function GiftHampers() {
             </div>
 
             {productsFor(managing.id).length < MAX_PRODUCTS_PER_HAMPER ? (
-              <div className="flex gap-2 border-t border-border pt-3">
-                <select className="input flex-1" value={pickId} onChange={(e) => setPickId(e.target.value)}>
-                  <option value="">Select a product to add...</option>
-                  {inventory
-                    .filter((i) => !productsFor(managing.id).some((p) => p.inventory_id === i.id))
-                    .map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.name} {i.model} — {formatCurrency(i.price)}
-                      </option>
+              <div className="space-y-2 border-t border-border pt-3">
+                <div className="flex gap-2">
+                  <select
+                    className="input w-40"
+                    value={pickBrand}
+                    onChange={(e) => {
+                      setPickBrand(e.target.value);
+                      setPickId("");
+                    }}
+                  >
+                    <option value="">All brands</option>
+                    {brands.map((b) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
                     ))}
-                </select>
-                <input
-                  type="number"
-                  min={1}
-                  className="input !w-16"
-                  value={pickQty}
-                  onChange={(e) => setPickQty(Math.max(1, Number(e.target.value)))}
-                />
-                <button className="btn-secondary" onClick={addProductToHamper} disabled={!pickId}>Add</button>
+                  </select>
+                  <select className="input flex-1" value={pickId} onChange={(e) => setPickId(e.target.value)}>
+                    <option value="">Select a product to add...</option>
+                    {inventory
+                      .filter((i) => !productsFor(managing.id).some((p) => p.inventory_id === i.id))
+                      .filter((i) => !pickBrand || i.brand_id === pickBrand)
+                      .map((i) => (
+                        <option key={i.id} value={i.id} disabled={!isAvailable(i)}>
+                          {brandName(i.brand_id)} {i.name} {i.model} — {formatCurrency(i.price)}
+                          {isAvailable(i) ? ` — ${i.stock} in stock` : " — Unavailable"}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    className="input !w-16"
+                    value={pickQty}
+                    onChange={(e) => setPickQty(Math.max(1, Number(e.target.value)))}
+                  />
+                  <button className="btn-secondary flex-1" onClick={addProductToHamper} disabled={!pickId}>Add</button>
+                </div>
               </div>
             ) : (
               <p className="border-t border-border pt-3 text-xs text-amber-600">
@@ -292,6 +373,23 @@ export function GiftHampers() {
             <div className="flex items-center justify-between border-t border-border pt-2 text-sm">
               <span className="text-gray-500">Bundle value (sum of product prices)</span>
               <span className="font-semibold text-brand-primary">{formatCurrency(bundleValue(managing.id))}</span>
+            </div>
+
+            <div className="border-t border-border pt-2">
+              <span className="mb-1 block text-xs font-medium text-gray-600">Offer attached to this hamper</span>
+              <select
+                className="input w-full"
+                value={managing.offer_id ?? ""}
+                onChange={(e) => {
+                  setHamperOffer(managing, e.target.value);
+                  setManaging({ ...managing, offer_id: e.target.value || null });
+                }}
+              >
+                <option value="">No offer</option>
+                {offers.map((o) => (
+                  <option key={o.id} value={o.id}>{offerLabel(o)}</option>
+                ))}
+              </select>
             </div>
 
             <div className="flex justify-end pt-2">
