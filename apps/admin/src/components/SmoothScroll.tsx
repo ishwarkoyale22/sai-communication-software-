@@ -22,6 +22,15 @@ import "lenis/dist/lenis.css";
  * already forces scroll-behavior:auto under that media query for anchor
  * jumps, and Lenis independently skips its own smoothing the same way, so a
  * user with reduced-motion enabled always gets instant scroll either way.
+ *
+ * allowNestedScroll: true is required — this app has its own nested
+ * scrollable regions inside the Lenis-controlled `<main>` (the Add/Edit
+ * Product modal's field list, the sidebar nav, tables with
+ * overflow-x-auto). Without it, Lenis hijacks every wheel/touch gesture
+ * for the outer `<main>` scroll, so those inner regions become
+ * completely unscrollable — confirmed live: the Add Product modal on
+ * mobile stopped scrolling entirely after this component was first added
+ * without this option.
  */
 export function SmoothScroll({
   wrapperRef,
@@ -43,6 +52,7 @@ export function SmoothScroll({
       syncTouchLerp: 0.075,
       touchMultiplier: 1,
       autoRaf: true,
+      allowNestedScroll: true,
     });
 
     return () => lenis.destroy();
