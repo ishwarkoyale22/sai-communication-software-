@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
 
@@ -16,6 +16,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
+  // supabase-js fires onAuthStateChange once immediately with the current
+  // session (in addition to real future changes) — combined with the
+  // explicit getSession().then() below, that made checkAdmin() (a real
+  // network round trip to `profiles`) run twice on every single page load.
+  // This tracks the last user id already checked (or in flight) so the
+  // second, redundant call is skipped instead of re-querying.
+  const lastCheckedUserId = useRef<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -41,6 +48,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function checkAdmin(userId: string) {
+    if (lastCheckedUserId.current === userId) {
+      setLoading(false);
+      return;
+    }
+    lastCheckedUserId.current = userId;
     // Admin status is decided ONLY by profiles.role — no email-pattern
     // guessing, no auto-granting on missing/error. A prior version of this
     // function granted admin to any account whose email didn't end in

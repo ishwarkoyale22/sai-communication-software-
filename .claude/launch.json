@@ -9,6 +9,14 @@
       "autoPort": true
     },
     {
+      "name": "admin-prod-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview"],
+      "cwd": "apps/admin",
+      "port": 4173,
+      "autoPort": true
+    },
+    {
       "name": "customer-web",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],

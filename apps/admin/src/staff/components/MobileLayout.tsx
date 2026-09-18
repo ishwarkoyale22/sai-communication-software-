@@ -1,9 +1,13 @@
+import { useRef } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { Home, Clock, ListChecks, Bell, LogOut } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
+import { SmoothScroll } from "../../components/SmoothScroll";
 
 export function MobileLayout() {
   const { staff, signOut } = useStaffAuth();
+  const mainRef = useRef<HTMLElement | null>(null);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
   const firstName = staff?.name?.split(" ")[0] ?? "";
   const initials = staff?.name
     ? staff.name
@@ -39,9 +43,12 @@ export function MobileLayout() {
             <LogOut size={15} />
           </button>
         </header>
-        <main className="flex-1 overflow-y-auto bg-page p-4 pb-20">
-          <Outlet />
+        <main ref={mainRef} className="flex-1 overflow-y-auto bg-page p-4 pb-20">
+          <div ref={mainContentRef}>
+            <Outlet />
+          </div>
         </main>
+        <SmoothScroll wrapperRef={mainRef} contentRef={mainContentRef} />
         <nav className="absolute inset-x-0 bottom-0 flex h-16 border-t border-border bg-card">
           {[
             { to: "/portal", label: "Home", icon: Home, end: true },

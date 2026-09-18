@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { SmoothScroll } from "./SmoothScroll";
 import {
   LayoutDashboard,
   Package,
@@ -105,6 +106,8 @@ export function Layout() {
   // drawer below that — closed by default so a phone/tablet load doesn't
   // start with a full-height overlay covering the page.
   const [navOpen, setNavOpen] = useState(false);
+  const mainRef = useRef<HTMLElement | null>(null);
+  const mainContentRef = useRef<HTMLDivElement | null>(null);
 
   // Close the drawer automatically on navigation, so tapping a link doesn't
   // leave the overlay sitting open behind the new page.
@@ -253,9 +256,12 @@ export function Layout() {
             SC
           </div>
         </header>
-        <main className="flex-1 overflow-y-auto p-3 sm:p-5">
-          <Outlet />
+        <main ref={mainRef} className="flex-1 overflow-y-auto p-3 sm:p-5">
+          <div ref={mainContentRef}>
+            <Outlet />
+          </div>
         </main>
+        <SmoothScroll wrapperRef={mainRef} contentRef={mainContentRef} />
       </div>
     </div>
   );
