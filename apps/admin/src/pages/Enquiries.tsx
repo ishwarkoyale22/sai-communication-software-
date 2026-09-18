@@ -5,7 +5,16 @@ import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
 import { X, MessageSquarePlus } from "lucide-react";
 
-type EnquiryStatus = "new" | "contacted" | "closed";
+// Must match the live `enquiries_status_check` constraint — verified
+// directly against the database, not guessed. Older code/docs mention a
+// "new/contacted/closed" trio, but the live DB only accepts these four.
+type EnquiryStatus = "new" | "in_progress" | "resolved" | "closed";
+const STATUS_LABELS: Record<EnquiryStatus, string> = {
+  new: "New",
+  in_progress: "In Progress",
+  resolved: "Resolved",
+  closed: "Closed",
+};
 interface Enquiry {
   id: string;
   customer_name: string;
@@ -45,7 +54,12 @@ export function Enquiries() {
   }
 
   async function setStatus(id: string, status: EnquiryStatus) {
-    await supabase.from("enquiries").update({ status }).eq("id", id);
+    const { error } = await supabase.from("enquiries").update({ status }).eq("id", id);
+    if (error) {
+      alert(error.message || "Failed to update status.");
+      return;
+    }
+    await load();
   }
 
   function openDetail(e: Enquiry) {
@@ -74,7 +88,7 @@ export function Enquiries() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">
           Enquiries {newCount > 0 && <span className="pill-info ml-2 align-middle">{newCount} new</span>}
         </h1>
@@ -96,15 +110,15 @@ export function Enquiries() {
       <p className="text-sm text-gray-500">Submitted from the public website's catalog / contact enquiry form.</p>
 
       <div className="flex gap-2">
-        {(["all", "new", "contacted", "closed"] as const).map((s) => (
+        {(["all", "new", "in_progress", "resolved", "closed"] as const).map((s) => (
           <button
             key={s}
             onClick={() => setStatusFilter(s)}
-            className={`rounded-full px-3 py-1 text-sm capitalize ${
+            className={`rounded-full px-3 py-1 text-sm ${
               statusFilter === s ? "bg-brand-primary text-white" : "bg-gray-100 text-gray-600"
             }`}
           >
-            {s}
+            {s === "all" ? "All" : STATUS_LABELS[s]}
           </button>
         ))}
       </div>
@@ -147,14 +161,15 @@ export function Enquiries() {
                 <td className="text-gray-500">{formatDateTime(e.created_at)}</td>
                 <td>
                   <div className="flex items-center gap-2">
-                    <StatusPill status={e.status} />
+                    <StatusPill status={e.status} label={STATUS_LABELS[e.status]} />
                     <select
                       className="input !w-auto !py-0.5 text-xs"
                       value={e.status}
                       onChange={(ev) => setStatus(e.id, ev.target.value as EnquiryStatus)}
                     >
                       <option value="new">New</option>
-                      <option value="contacted">Contacted</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="resolved">Resolved</option>
                       <option value="closed">Closed</option>
                     </select>
                   </div>

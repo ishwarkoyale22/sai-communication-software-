@@ -60,19 +60,23 @@ interface RecentOrder {
   created_at: string;
 }
 
+// Must match the live `repairs_status_check` constraint (see Repairs.tsx —
+// verified directly against the database, not guessed): received/in_repair/
+// waiting_parts/completed/delivered/cancelled. "Open" excludes the three
+// closed-out states (completed, delivered, cancelled).
 const REPAIR_STATUS_LABEL: Record<string, string> = {
   received: "Received",
-  in_progress: "In Progress",
+  in_repair: "In Progress",
   waiting_parts: "Waiting for Parts",
-  ready: "Ready for Delivery",
   completed: "Completed",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
 };
-const OPEN_REPAIR_STATUSES = ["received", "in_progress", "waiting_parts", "ready"];
+const OPEN_REPAIR_STATUSES = ["received", "in_repair", "waiting_parts"];
 const REPAIR_STATUS_TILE: Record<string, string> = {
   received: "card-blue",
-  in_progress: "card-amber",
+  in_repair: "card-amber",
   waiting_parts: "card-red",
-  ready: "card-green",
 };
 
 function periodStart(period: "day" | "week" | "month" | "year"): Date {

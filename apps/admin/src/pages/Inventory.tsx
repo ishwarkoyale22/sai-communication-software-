@@ -79,11 +79,250 @@ const emptyForm = {
   battery_health: 0,
   warranty_months: 0,
   is_featured: false,
-  image_url: "",
   cost_price: 0,
   is_serialized: false,
   serials: "",
+  images: [] as string[],
+  ram: [] as string[],
+  storage: [] as string[],
+  color: [] as string[],
+  variant_prices: {} as Record<string, number>,
 };
+
+/** Key a RAM+Storage combo maps its price under in specs.variant_prices. */
+function variantKey(ram: string, storage: string): string {
+  return `${ram}|||${storage}`;
+}
+
+function buildSpecs(
+  ram: string[],
+  storage: string[],
+  color: string[],
+  variantPrices: Record<string, number>
+): Record<string, unknown> | null {
+  const specs: Record<string, unknown> = {};
+  if (ram.length > 0) specs.ram = ram;
+  if (storage.length > 0) specs.storage = storage;
+  if (color.length > 0) specs.color = color;
+  // Only keep prices for combos that still exist among the current RAM/Storage options.
+  if (ram.length > 0 && storage.length > 0) {
+    const pruned: Record<string, number> = {};
+    for (const r of ram) {
+      for (const s of storage) {
+        const key = variantKey(r, s);
+        if (variantPrices[key] > 0) pruned[key] = variantPrices[key];
+      }
+    }
+    if (Object.keys(pruned).length > 0) specs.variant_prices = pruned;
+  }
+  return Object.keys(specs).length > 0 ? specs : null;
+}
+
+function specsArray(specs: Record<string, unknown> | null | undefined, key: string): string[] {
+  const value = specs?.[key];
+  return Array.isArray(value) ? value.map(String) : [];
+}
+
+function specsVariantPrices(specs: Record<string, unknown> | null | undefined): Record<string, number> {
+  const value = specs?.variant_prices;
+  return value && typeof value === "object" ? (value as Record<string, number>) : {};
+}
+
+/** Lowest set variant price — used as the product's headline "starting at" price. */
+function minVariantPrice(variantPrices: Record<string, number>): number | null {
+  const values = Object.values(variantPrices).filter((v) => v > 0);
+  return values.length > 0 ? Math.min(...values) : null;
+}
+
+/** Per-combo price grid, shown once at least one RAM and one Storage option exist. */
+function VariantPriceGrid({
+  ram,
+  storage,
+  prices,
+  onChange,
+}: {
+  ram: string[];
+  storage: string[];
+  prices: Record<string, number>;
+  onChange: (prices: Record<string, number>) => void;
+}) {
+  if (ram.length === 0 || storage.length === 0) return null;
+
+  return (
+    <Field label="Price by RAM + Storage (₹) — leave a cell blank to use the base Price above">
+      <div className="overflow-x-auto rounded-md border border-gray-200">
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="p-1.5 text-left font-medium text-gray-500">RAM \ Storage</th>
+              {storage.map((s) => (
+                <th key={s} className="p-1.5 text-left font-medium text-gray-500">
+                  {s}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {ram.map((r) => (
+              <tr key={r} className="border-t border-gray-100">
+                <td className="p-1.5 font-medium text-gray-700">{r}</td>
+                {storage.map((s) => {
+                  const key = variantKey(r, s);
+                  return (
+                    <td key={s} className="p-1.5">
+                      <input
+                        type="number"
+                        className="input w-24 !py-1 text-xs"
+                        placeholder="—"
+                        value={prices[key] || ""}
+                        onChange={(e) =>
+                          onChange({ ...prices, [key]: Number(e.target.value) || 0 })
+                        }
+                      />
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Field>
+  );
+}
+
+/** Chip-style input for entering several values (e.g. "8GB", "16GB", "32GB") for one field. */
+function TagInput({
+  label,
+  placeholder,
+  values,
+  onChange,
+}: {
+  label: string;
+  placeholder: string;
+  values: string[];
+  onChange: (values: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  function commitDraft() {
+    const v = draft.trim();
+    if (v && !values.includes(v)) onChange([...values, v]);
+    setDraft("");
+  }
+
+  return (
+    <Field label={label}>
+      <div className="input flex w-full flex-wrap items-center gap-1.5 !h-auto min-h-[38px] py-1.5">
+        {values.map((v, i) => (
+          <span
+            key={v}
+            className="flex items-center gap-1 rounded-full bg-brand-primary/10 px-2 py-0.5 text-xs text-brand-primary"
+          >
+            {v}
+            <button
+              type="button"
+              onClick={() => onChange(values.filter((_, idx) => idx !== i))}
+              className="text-brand-primary/70 hover:text-brand-primary"
+            >
+              <X size={11} />
+            </button>
+          </span>
+        ))}
+        <input
+          className="min-w-[70px] flex-1 border-0 p-0 text-sm outline-none focus:ring-0"
+          placeholder={values.length === 0 ? placeholder : ""}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === ",") {
+              e.preventDefault();
+              commitDraft();
+            } else if (e.key === "Backspace" && draft === "" && values.length > 0) {
+              onChange(values.slice(0, -1));
+            }
+          }}
+          onBlur={commitDraft}
+        />
+      </div>
+    </Field>
+  );
+}
+
+/** Number input with +/- buttons for adjusting a quantity like stock. */
+function QuantityStepper({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-1.5">
+        <button
+          type="button"
+          className="btn-secondary flex size-9 shrink-0 items-center justify-center !p-0 text-lg"
+          onClick={() => onChange(Math.max(0, value - 1))}
+          aria-label="Decrease quantity"
+        >
+          −
+        </button>
+        <input
+          type="number"
+          className="input w-full text-center"
+          value={value}
+          onChange={(e) => onChange(Math.max(0, Number(e.target.value) || 0))}
+        />
+        <button
+          type="button"
+          className="btn-secondary flex size-9 shrink-0 items-center justify-center !p-0 text-lg"
+          onClick={() => onChange(value + 1)}
+          aria-label="Increase quantity"
+        >
+          +
+        </button>
+      </div>
+    </Field>
+  );
+}
+
+/** Text field + button for adding one more image by URL, appended to the gallery above. */
+function AddImageUrlField({ onAdd }: { onAdd: (url: string) => void }) {
+  const [draft, setDraft] = useState("");
+
+  function commit() {
+    if (draft.trim()) {
+      onAdd(draft);
+      setDraft("");
+    }
+  }
+
+  return (
+    <details className="text-xs text-gray-500">
+      <summary className="cursor-pointer select-none">Or add an image by URL instead</summary>
+      <div className="mt-1.5 flex gap-1.5">
+        <input
+          className="input flex-1"
+          placeholder="https://..."
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commit();
+            }
+          }}
+        />
+        <button type="button" className="btn-secondary !py-1.5 text-xs" onClick={commit}>
+          Add
+        </button>
+      </div>
+    </details>
+  );
+}
 
 type SortKey = "name" | "price_desc" | "stock_asc" | "stock_desc" | "category";
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
@@ -109,7 +348,6 @@ export function Inventory() {
   const [success, setSuccess] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [localPreview, setLocalPreview] = useState<string | null>(null); // instant preview before upload finishes
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // "Manage Serials" modal — add/view per-unit IMEI/serial numbers for a
@@ -143,31 +381,49 @@ export function Inventory() {
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [scannedPending, setScannedPending] = useState<{ imei_1: string; imei_2: string; serial_no: string }[]>([]);
 
-  async function handleImageFile(file: File | undefined) {
-    if (!file) return;
+  async function handleImageFiles(files: FileList | null) {
+    if (!files || files.length === 0) return;
     setError(null);
-
-    // Instant local preview (no network wait) — revoked once the real
-    // uploaded URL takes over, so we don't leak object URLs.
-    const objectUrl = URL.createObjectURL(file);
-    setLocalPreview(objectUrl);
-
     setUploading(true);
+
     try {
-      const publicUrl = await uploadProductImage(file);
-      if (editingItem) {
-        setEditingItem((prev) => (prev ? { ...prev, images: [publicUrl] } : prev));
-      } else {
-        setForm((prev) => ({ ...prev, image_url: publicUrl }));
+      // Upload one at a time and append as each finishes, so a single bad
+      // file doesn't lose the URLs already uploaded before it.
+      for (const file of Array.from(files)) {
+        try {
+          const publicUrl = await uploadProductImage(file);
+          if (editingItem) {
+            setEditingItem((prev) => (prev ? { ...prev, images: [...(prev.images ?? []), publicUrl] } : prev));
+          } else {
+            setForm((prev) => ({ ...prev, images: [...prev.images, publicUrl] }));
+          }
+        } catch (err: any) {
+          setError(err?.message || `Failed to upload ${file.name}.`);
+        }
       }
-      setLocalPreview(null); // real hosted URL now takes over from the temporary blob preview
-    } catch (err: any) {
-      setError(err?.message || "Failed to upload image.");
-      setLocalPreview(null);
     } finally {
       setUploading(false);
-      URL.revokeObjectURL(objectUrl);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  function removeImage(index: number) {
+    if (editingItem) {
+      setEditingItem((prev) =>
+        prev ? { ...prev, images: (prev.images ?? []).filter((_, i) => i !== index) } : prev
+      );
+    } else {
+      setForm((prev) => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
+    }
+  }
+
+  function addImageUrl(url: string) {
+    const trimmed = url.trim();
+    if (!trimmed) return;
+    if (editingItem) {
+      setEditingItem((prev) => (prev ? { ...prev, images: [...(prev.images ?? []), trimmed] } : prev));
+    } else {
+      setForm((prev) => ({ ...prev, images: [...prev.images, trimmed] }));
     }
   }
 
@@ -234,6 +490,13 @@ export function Inventory() {
   async function closeSerialsModal() {
     await stopScanner();
     setSerialsModalFor(null);
+  }
+
+  async function closeAddOrEditForm() {
+    await stopScanner();
+    setScanFeedback(null);
+    if (editingItem) setEditingItem(null);
+    else setShowAddForm(false);
   }
 
   // Cross-column duplicate check against ALL existing units in this shop's
@@ -444,7 +707,13 @@ export function Inventory() {
       );
     } catch (err: any) {
       setScanActive(false);
-      setSerialsModalError(err?.message || "Could not start camera — permission may be denied.");
+      const message = err?.message || "Could not start camera — permission may be denied.";
+      // scanFeedback renders in both the Add-Product form's scan section and
+      // the Manage Serials modal's, so the failure is visible regardless of
+      // which one is open; serialsModalError additionally surfaces it in the
+      // Manage Serials modal's own error banner.
+      setScanFeedback(message);
+      setSerialsModalError(message);
     }
   }
 
@@ -468,7 +737,29 @@ export function Inventory() {
       setScanFeedback(res.message ?? "Invalid scan");
       return;
     }
-    // Reject if already in the pending list or existing stock.
+
+    // Add New Product form: scanning here builds up the plain "one per
+    // line" serials textarea directly, so a brand-new serialized product
+    // (e.g. a fresh wholesaler carton) can be created and stocked in one
+    // pass instead of adding it first and scanning separately afterwards.
+    if (showAddForm) {
+      const existing = parseSerials(form.serials);
+      if (existing.includes(res.normalized)) {
+        setScanFeedback(`Already scanned in this batch: ${res.normalized}`);
+        return;
+      }
+      const owner = await findExistingImeiOwner(res.normalized);
+      if (owner) {
+        setScanFeedback(`IMEI ${res.normalized} already exists.`);
+        return;
+      }
+      setForm((prev) => ({ ...prev, serials: [...parseSerials(prev.serials), res.normalized].join("\n") }));
+      setScanFeedback(`Added ${res.normalized}`);
+      return;
+    }
+
+    // Manage Serials modal (existing product): reject if already in the
+    // pending list or existing stock.
     if (scannedPending.some((r) => r.imei_1 === res.normalized || r.imei_2 === res.normalized)) {
       setScanFeedback(`Already scanned in this batch: ${res.normalized}`);
       return;
@@ -514,7 +805,7 @@ export function Inventory() {
           category: form.category,
           brand_id: form.brand_id || null,
           product_type: form.product_type,
-          price: Number(form.price) || 0,
+          price: minVariantPrice(form.variant_prices) ?? (Number(form.price) || 0),
           original_price: Number(form.original_price) || null,
           // Serialized items derive stock from inventory_units (via trigger)
           // — 0 here is just the starting point until serials are inserted below.
@@ -524,10 +815,11 @@ export function Inventory() {
           battery_health: form.product_type === "refurbished" ? Number(form.battery_health) || null : null,
           warranty_months: Number(form.warranty_months) || 0,
           is_featured: form.is_featured,
-          images: form.image_url.trim() ? [form.image_url.trim()] : [],
+          images: form.images,
           is_active: true,
           cost_price: Number(form.cost_price) || null,
           is_serialized: form.is_serialized,
+          specs: buildSpecs(form.ram, form.storage, form.color, form.variant_prices),
         })
         .select("id")
         .single();
@@ -543,6 +835,7 @@ export function Inventory() {
 
       setForm(emptyForm);
       setShowAddForm(false);
+      await stopScanner();
       setSuccess("Item added successfully!");
       setTimeout(() => setSuccess(null), 4000);
       await load();
@@ -571,7 +864,8 @@ export function Inventory() {
           category: editingItem.category,
           brand_id: editingItem.brand_id || null,
           product_type: editingItem.product_type,
-          price: Number(editingItem.price) || 0,
+          price:
+            minVariantPrice(specsVariantPrices(editingItem.specs)) ?? (Number(editingItem.price) || 0),
           original_price: Number(editingItem.original_price) || null,
           condition: editingItem.product_type === "refurbished" ? editingItem.condition || null : null,
           grade: editingItem.product_type === "refurbished" ? editingItem.grade || null : null,
@@ -581,6 +875,14 @@ export function Inventory() {
           images: editingItem.images ?? [],
           is_active: editingItem.is_active,
           cost_price: editingItem.cost_price == null ? null : Number(editingItem.cost_price),
+          // Serialized items derive stock from inventory_units (via trigger) — leave it untouched here.
+          ...(editingItem.is_serialized ? {} : { stock: Number(editingItem.stock) || 0 }),
+          specs: buildSpecs(
+            specsArray(editingItem.specs, "ram"),
+            specsArray(editingItem.specs, "storage"),
+            specsArray(editingItem.specs, "color"),
+            specsVariantPrices(editingItem.specs)
+          ),
         })
         .eq("id", editingItem.id);
 
@@ -712,9 +1014,9 @@ export function Inventory() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">Inventory Catalog</h1>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <ExportExcelButton
             rows={filtered.map((p) => ({
               Name: p.name,
@@ -738,7 +1040,6 @@ export function Inventory() {
             className="btn-primary flex items-center gap-1.5"
             onClick={() => {
               setError(null);
-              setLocalPreview(null);
               setShowAddForm(true);
             }}
           >
@@ -900,7 +1201,6 @@ export function Inventory() {
                         className="btn-secondary !px-2 !py-1 text-xs"
                         onClick={() => {
                           setError(null);
-                          setLocalPreview(null);
                           setEditingItem(p);
                         }}
                         title="Edit"
@@ -936,7 +1236,7 @@ export function Inventory() {
             <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
               <h2 className="text-base font-semibold text-gray-800">{editingItem ? "Edit Product" : "Add New Product"}</h2>
               <button
-                onClick={() => (editingItem ? setEditingItem(null) : setShowAddForm(false))}
+                onClick={closeAddOrEditForm}
                 className="text-gray-400 hover:text-gray-600"
               >
                 <X size={18} />
@@ -975,53 +1275,61 @@ export function Inventory() {
                 />
               </Field>
 
-              <Field label="Product Image">
-                <div className="flex items-start gap-3">
-                  <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-gray-200 bg-gray-50">
-                    {uploading ? (
-                      <Loader2 className="size-5 animate-spin text-gray-400" />
-                    ) : localPreview || (editingItem ? editingItem.images?.[0] : form.image_url) ? (
-                      <img
-                        src={localPreview || (editingItem ? editingItem.images?.[0] : form.image_url) || ""}
-                        alt="Preview"
-                        className="h-full w-full object-cover"
-                        onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
-                      />
-                    ) : (
-                      <span className="text-[10px] text-gray-400">No image</span>
+              <Field label="Product Images">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap gap-2">
+                    {(editingItem ? editingItem.images ?? [] : form.images).map((url, i) => (
+                      <div
+                        key={url + i}
+                        className="group relative size-20 shrink-0 overflow-hidden rounded-md border border-gray-200 bg-gray-50"
+                      >
+                        <img
+                          src={url}
+                          alt={`Product photo ${i + 1}`}
+                          className="h-full w-full object-cover"
+                          onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeImage(i)}
+                          className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100"
+                          aria-label="Remove image"
+                        >
+                          <X size={10} />
+                        </button>
+                      </div>
+                    ))}
+                    {uploading && (
+                      <div className="flex size-20 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-gray-50">
+                        <Loader2 className="size-5 animate-spin text-gray-400" />
+                      </div>
+                    )}
+                    {(editingItem ? editingItem.images ?? [] : form.images).length === 0 && !uploading && (
+                      <div className="flex size-20 shrink-0 items-center justify-center rounded-md border border-gray-200 bg-gray-50">
+                        <span className="text-[10px] text-gray-400">No image</span>
+                      </div>
                     )}
                   </div>
-                  <div className="flex-1 space-y-1.5">
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/jpeg,image/png,image/webp,image/gif"
-                      className="hidden"
-                      onChange={(e) => handleImageFile(e.target.files?.[0])}
-                    />
-                    <button
-                      type="button"
-                      className="btn-secondary flex items-center gap-1.5 !py-1.5 text-xs"
-                      disabled={uploading}
-                      onClick={() => fileInputRef.current?.click()}
-                    >
-                      <Upload size={13} />
-                      {uploading ? "Uploading…" : "Upload from computer"}
-                    </button>
-                    <details className="text-xs text-gray-500">
-                      <summary className="cursor-pointer select-none">Or paste an image URL instead</summary>
-                      <input
-                        className="input mt-1.5 w-full"
-                        placeholder="https://..."
-                        value={editingItem ? editingItem.images?.[0] ?? "" : form.image_url}
-                        onChange={(e) =>
-                          editingItem
-                            ? setEditingItem({ ...editingItem, images: e.target.value ? [e.target.value] : [] })
-                            : setForm({ ...form, image_url: e.target.value })
-                        }
-                      />
-                    </details>
-                  </div>
+
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleImageFiles(e.target.files)}
+                  />
+                  <button
+                    type="button"
+                    className="btn-secondary flex items-center gap-1.5 !py-1.5 text-xs"
+                    disabled={uploading}
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    <Upload size={13} />
+                    {uploading ? "Uploading…" : "Upload from computer (select multiple at once)"}
+                  </button>
+
+                  <AddImageUrlField onAdd={addImageUrl} />
                 </div>
               </Field>
 
@@ -1063,6 +1371,50 @@ export function Inventory() {
                 </Field>
               </div>
 
+              <div className="grid grid-cols-3 gap-2">
+                <TagInput
+                  label="RAM (add each option)"
+                  placeholder="e.g. 8GB, ↵"
+                  values={editingItem ? specsArray(editingItem.specs, "ram") : form.ram}
+                  onChange={(vals) =>
+                    editingItem
+                      ? setEditingItem({ ...editingItem, specs: { ...editingItem.specs, ram: vals } })
+                      : setForm({ ...form, ram: vals })
+                  }
+                />
+                <TagInput
+                  label="Storage (add each option)"
+                  placeholder="e.g. 128GB, ↵"
+                  values={editingItem ? specsArray(editingItem.specs, "storage") : form.storage}
+                  onChange={(vals) =>
+                    editingItem
+                      ? setEditingItem({ ...editingItem, specs: { ...editingItem.specs, storage: vals } })
+                      : setForm({ ...form, storage: vals })
+                  }
+                />
+                <TagInput
+                  label="Color (add each option)"
+                  placeholder="e.g. Black, ↵"
+                  values={editingItem ? specsArray(editingItem.specs, "color") : form.color}
+                  onChange={(vals) =>
+                    editingItem
+                      ? setEditingItem({ ...editingItem, specs: { ...editingItem.specs, color: vals } })
+                      : setForm({ ...form, color: vals })
+                  }
+                />
+              </div>
+
+              <VariantPriceGrid
+                ram={editingItem ? specsArray(editingItem.specs, "ram") : form.ram}
+                storage={editingItem ? specsArray(editingItem.specs, "storage") : form.storage}
+                prices={editingItem ? specsVariantPrices(editingItem.specs) : form.variant_prices}
+                onChange={(prices) =>
+                  editingItem
+                    ? setEditingItem({ ...editingItem, specs: { ...editingItem.specs, variant_prices: prices } })
+                    : setForm({ ...form, variant_prices: prices })
+                }
+              />
+
               <Field label="Type">
                 <select
                   className="input w-full"
@@ -1079,11 +1431,28 @@ export function Inventory() {
               </Field>
 
               <div className="grid grid-cols-2 gap-2">
-                <Field label="Price (₹) *">
+                <Field
+                  label={
+                    (editingItem
+                      ? specsArray(editingItem.specs, "ram").length > 0 && specsArray(editingItem.specs, "storage").length > 0
+                      : form.ram.length > 0 && form.storage.length > 0)
+                      ? "Price (₹) — auto-set to the lowest RAM+Storage price above"
+                      : "Price (₹) *"
+                  }
+                >
                   <input
                     type="number"
                     className="input w-full"
-                    value={editingItem ? editingItem.price : form.price}
+                    disabled={
+                      editingItem
+                        ? minVariantPrice(specsVariantPrices(editingItem.specs)) != null
+                        : minVariantPrice(form.variant_prices) != null
+                    }
+                    value={
+                      editingItem
+                        ? minVariantPrice(specsVariantPrices(editingItem.specs)) ?? editingItem.price
+                        : minVariantPrice(form.variant_prices) ?? form.price
+                    }
                     onChange={(e) =>
                       editingItem
                         ? setEditingItem({ ...editingItem, price: Number(e.target.value) })
@@ -1139,18 +1508,38 @@ export function Inventory() {
                         value={form.serials}
                         onChange={(e) => setForm({ ...form, serials: e.target.value })}
                       />
+                      <div className="mt-2">
+                        {!scanActive ? (
+                          <button type="button" className="btn-secondary w-full text-xs" onClick={startScanner}>
+                            <Camera size={13} /> Scan IMEI / Serial with Camera
+                          </button>
+                        ) : (
+                          <>
+                            <div id="imei-scanner-region" className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
+                            <button type="button" className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
+                              Stop Camera
+                            </button>
+                          </>
+                        )}
+                        {scanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{scanFeedback}</p>}
+                      </div>
                     </Field>
                   ) : (
-                    <Field label="Initial Stock">
-                      <input
-                        type="number"
-                        className="input w-full"
-                        value={form.stock}
-                        onChange={(e) => setForm({ ...form, stock: Number(e.target.value) })}
-                      />
-                    </Field>
+                    <QuantityStepper
+                      label="Initial Stock"
+                      value={form.stock}
+                      onChange={(v) => setForm({ ...form, stock: v })}
+                    />
                   )}
                 </>
+              )}
+
+              {editingItem && !editingItem.is_serialized && (
+                <QuantityStepper
+                  label="Stock"
+                  value={editingItem.stock}
+                  onChange={(v) => setEditingItem({ ...editingItem, stock: v })}
+                />
               )}
 
               {(editingItem ? editingItem.product_type : form.product_type) === "refurbished" && (
@@ -1239,7 +1628,7 @@ export function Inventory() {
               <button
                 type="button"
                 className="btn-ghost"
-                onClick={() => (editingItem ? setEditingItem(null) : setShowAddForm(false))}
+                onClick={closeAddOrEditForm}
                 disabled={saving}
               >
                 Cancel

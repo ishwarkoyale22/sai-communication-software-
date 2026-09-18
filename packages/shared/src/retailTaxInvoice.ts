@@ -85,7 +85,20 @@ function fmtDate(dateStr: string): string {
   return `${dd}/${mm}/${d.getFullYear()}`;
 }
 
-export function openRetailTaxInvoice(input: RetailTaxInvoiceInput): void {
+/**
+ * Opens a blank tab up front, synchronously, in the same tick as the click
+ * that triggered it — before any `await`. Popup blockers key off "was this
+ * window.open call still inside the original user gesture?", and an async
+ * gap (e.g. a Supabase fetch) before calling window.open breaks that chain
+ * silently: no error, the window just never opens. Callers that need to
+ * fetch data first should call this immediately on click, then pass the
+ * handle into `openRetailTaxInvoice` once the data is ready.
+ */
+export function openBlankInvoiceWindow(): Window | null {
+  return window.open("", "_blank", "width=960,height=1000");
+}
+
+export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?: Window | null): void {
   const { shop } = input;
 
   // ── Line item rows ──────────────────────────────────────────────────────────
@@ -443,8 +456,11 @@ ${input.mode === "view" ? "" : "<script>window.onload = () => window.print();</s
 </body>
 </html>`;
 
-  const win = window.open("", "_blank", "width=960,height=1000");
-  if (!win) return;
+  const win = targetWindow !== undefined ? targetWindow : openBlankInvoiceWindow();
+  if (!win) {
+    alert("Your browser blocked the invoice popup. Please allow popups for this site and try again.");
+    return;
+  }
   win.document.write(html);
   win.document.close();
 }

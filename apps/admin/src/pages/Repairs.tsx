@@ -7,31 +7,32 @@ import { StatusPill } from "../components/StatusPill";
 import { repairEnquiryStatusFor } from "../lib/repairEnquiryStatus";
 import { LayoutGrid, List, Plus, PhoneCall } from "lucide-react";
 
-// Underlying values are unchanged (received/in_progress/waiting_parts/ready/
-// completed) to avoid an enum migration + touching every existing row —
-// only the on-screen labels are reworded to match the requirements doc's
-// "Called Up / Pending / Submitted->In Process / Repaired-Completed"
-// vocabulary. "Called Up" itself is tracked separately below via
-// `contacted_at`, since it's a contact-status orthogonal to repair progress
-// (a repair can be "in process" whether or not anyone has called the
-// customer back), not a stage in this same progression.
-const REPAIR_STATUSES = ["received", "in_progress", "waiting_parts", "ready", "completed"] as const;
+// Must exactly match the live `repairs_status_check` constraint — verified
+// directly against the database, not guessed (an older comment here claimed
+// received/in_progress/waiting_parts/ready/completed, but the live DB
+// actually only accepts these six: received, in_repair, waiting_parts,
+// completed, delivered, cancelled — "in_progress" and "ready" are silently
+// rejected by Postgres, which made the "In Process" and "Repaired" kanban
+// columns totally non-functional).
+const REPAIR_STATUSES = ["received", "in_repair", "waiting_parts", "completed", "delivered", "cancelled"] as const;
 type RepairStatus = (typeof REPAIR_STATUSES)[number];
 
 const STATUS_TILE: Record<RepairStatus, string> = {
   received: "card-blue",
-  in_progress: "card-amber",
+  in_repair: "card-amber",
   waiting_parts: "card-red",
-  ready: "card-green",
-  completed: "card-purple",
+  completed: "card-green",
+  delivered: "card-purple",
+  cancelled: "card-red",
 };
 
 const STATUS_LABEL: Record<string, string> = {
   received: "Submitted / Pending",
-  in_progress: "In Process",
+  in_repair: "In Process",
   waiting_parts: "Waiting Parts",
-  ready: "Repaired",
-  completed: "Completed",
+  completed: "Repaired / Completed",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
 };
 
 interface RepairRow {
@@ -102,10 +103,22 @@ export function Repairs() {
   }
 
   async function setStatus(id: string, status: RepairStatus) {
-    await supabase
-      .from("repairs")
-      .update({ status, completed_at: status === "completed" ? new Date().toISOString() : null })
-      .eq("id", id);
+    const current = repairs.find((r) => r.id === id);
+    // Set once when the repair work actually finishes; "delivered" (handed
+    // back to the customer) keeps whatever completed_at was already there
+    // instead of clearing it, and only "received"/"in_repair"/"waiting_parts"
+    // reset it (the repair isn't done yet).
+    const completed_at =
+      status === "completed"
+        ? new Date().toISOString()
+        : status === "delivered"
+          ? (current?.completed_at ?? new Date().toISOString())
+          : null;
+    const { error } = await supabase.from("repairs").update({ status, completed_at }).eq("id", id);
+    if (error) {
+      alert(error.message || "Failed to update repair status.");
+      return;
+    }
 
     // Mirror progress onto the originating website enquiry, if any, so the
     // public Track Repair page (repair-track.tsx on the customer site —
@@ -113,16 +126,17 @@ export function Repairs() {
     // staying stuck at whatever it was when the enquiry first came in.
     // repair_enquiries.status has its own DB check constraint that only
     // allows pending/contacted/completed/cancelled (not this page's
-    // received/in_progress/waiting_parts/ready/completed) — see
+    // received/in_repair/waiting_parts/completed/delivered/cancelled) — see
     // repairEnquiryStatusFor for the mapping.
-    const enquiryId = repairs.find((r) => r.id === id)?.enquiry_id;
+    const enquiryId = current?.enquiry_id;
     if (enquiryId) {
-      const { error } = await supabase
+      const { error: enquiryErr } = await supabase
         .from("repair_enquiries")
         .update({ status: repairEnquiryStatusFor(status) })
         .eq("id", enquiryId);
-      if (error) console.error("[repairs] failed to sync enquiry status:", error.message);
+      if (enquiryErr) console.error("[repairs] failed to sync enquiry status:", enquiryErr.message);
     }
+    await load();
   }
 
   async function assignTechnician(id: string, technicianId: string) {
@@ -157,7 +171,7 @@ export function Repairs() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">Repairs</h1>
         <div className="flex gap-2">
           <ExportExcelButton
@@ -186,7 +200,7 @@ export function Repairs() {
       </div>
 
       {view === "kanban" ? (
-        <div className="grid grid-cols-5 gap-3">
+        <div className="grid grid-cols-6 gap-3">
           {REPAIR_STATUSES.map((status) => (
             <div key={status} className={`${STATUS_TILE[status]} p-2`}>
               <div className="mb-2 px-1 text-xs font-semibold uppercase text-gray-500">

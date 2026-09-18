@@ -127,7 +127,7 @@ export function Gallery() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-lg font-semibold text-gray-800">Gallery</h1>
           <p className="text-xs text-gray-500">Photos and videos shown on the public website's Gallery page.</p>

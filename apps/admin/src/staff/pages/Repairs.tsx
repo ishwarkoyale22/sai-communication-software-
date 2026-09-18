@@ -15,18 +15,19 @@ interface Repair {
   received_at: string;
 }
 
-// Labels match the requirements doc's Service Status vocabulary; the
-// underlying values are unchanged from the admin-side repairs.status enum
-// (received/in_progress/waiting_parts/ready/completed) — see
-// apps/admin/src/pages/Repairs.tsx for why.
+// Must match the live `repairs_status_check` constraint — see
+// apps/admin/src/pages/Repairs.tsx for the empirical verification. The
+// admin-side kanban and this staff view must stay in sync since both write
+// the same `repairs.status` column.
 const STATUS_LABEL: Record<string, string> = {
   received: "Submitted / Pending",
-  in_progress: "In Process",
+  in_repair: "In Process",
   waiting_parts: "Waiting Parts",
-  ready: "Repaired",
-  completed: "Completed",
+  completed: "Repaired / Completed",
+  delivered: "Delivered",
+  cancelled: "Cancelled",
 };
-const STATUS_OPTIONS = ["received", "in_progress", "waiting_parts", "ready", "completed"];
+const STATUS_OPTIONS = ["received", "in_repair", "waiting_parts", "completed", "delivered", "cancelled"];
 
 export function RepairsPage() {
   const { token } = useStaffAuth();
@@ -49,7 +50,12 @@ export function RepairsPage() {
   async function updateStatus(repairId: string, status: string) {
     if (!token) return;
     setUpdatingId(repairId);
-    await supabase.rpc("staff_update_repair_status", { p_token: token, p_repair_id: repairId, p_status: status });
+    const { error } = await supabase.rpc("staff_update_repair_status", {
+      p_token: token,
+      p_repair_id: repairId,
+      p_status: status,
+    });
+    if (error) alert(error.message || "Failed to update repair status.");
     await load();
     setUpdatingId(null);
   }

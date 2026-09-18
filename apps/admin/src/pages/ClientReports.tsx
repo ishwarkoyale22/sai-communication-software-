@@ -63,7 +63,7 @@ export function ClientReports() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">Client Reports</h1>
         <div className="flex gap-2">
           <select className="input !w-auto" value={customerFilter} onChange={(e) => setCustomerFilter(e.target.value)}>

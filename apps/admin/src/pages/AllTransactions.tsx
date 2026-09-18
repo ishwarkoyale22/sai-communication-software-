@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatCurrency, formatDate, openRetailTaxInvoice, openPurchaseBill } from "@sai/shared";
+import { formatCurrency, formatDate, openRetailTaxInvoice, openPurchaseBill, openBlankInvoiceWindow } from "@sai/shared";
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { Search, Filter, Printer, Share2, MoreVertical, FileText } from "lucide-react";
@@ -218,6 +218,9 @@ export function AllTransactions() {
   const reportTotal = reportRows.reduce((sum, r) => sum + r.total, 0);
 
   async function printTransaction(row: TxnRow, mode: "print" | "view" = "print") {
+    // Opened synchronously, still inside the click's user-gesture window —
+    // opening it after the awaits below would get silently popup-blocked.
+    const win = openBlankInvoiceWindow();
     setBusyId(row.id);
     setMenuOpenId(null);
     try {
@@ -240,7 +243,7 @@ export function AllTransactions() {
           totalAmount: sale.final_amount,
           shop: SHOP,
           mode,
-        });
+        }, win);
       } else if (row.source === "wholesaler") {
         const { data: inv, error } = await supabase.from("wholesaler_invoices").select("*").eq("id", row.sourceId).single();
         if (error) throw error;
@@ -258,7 +261,7 @@ export function AllTransactions() {
           totalAmount: inv.total_amount,
           shop: SHOP,
           mode,
-        });
+        }, win);
       } else {
         const { data: p, error } = await supabase.from("third_party_purchases").select("*").eq("id", row.sourceId).single();
         if (error) throw error;
@@ -272,9 +275,10 @@ export function AllTransactions() {
           totalAmount: p.total_price,
           shop: SHOP,
           mode,
-        });
+        }, win);
       }
     } catch (err: any) {
+      win?.close();
       alert(err?.message || "Failed to generate document.");
     } finally {
       setBusyId(null);
@@ -397,7 +401,7 @@ export function AllTransactions() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">All Transactions</h1>
       </div>
 

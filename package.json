@@ -8,9 +8,7 @@
   ],
   "scripts": {
     "dev:admin": "npm run dev --workspace=apps/admin",
-    "dev:web": "npm run dev --workspace=apps/web",
-    "build:admin": "npm run build --workspace=apps/admin",
-    "build:web": "npm run build --workspace=apps/web"
+    "build:admin": "npm run build --workspace=apps/admin"
   },
   "devDependencies": {
     "supabase": "^2.116.0"

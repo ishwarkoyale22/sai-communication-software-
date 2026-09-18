@@ -32,7 +32,7 @@ export function statusTone(
 ): "success" | "warning" | "danger" | "info" | "neutral" {
   if (!status) return "neutral";
   const s = status.toLowerCase();
-  if (["active", "paid", "collected", "processed", "ready", "approved"].includes(s)) return "success";
+  if (["active", "paid", "collected", "processed", "ready", "approved", "resolved"].includes(s)) return "success";
   if (["pending", "emi", "waiting_parts", "in_progress"].includes(s)) return "warning";
   if (["overdue", "critical", "received", "new", "rejected"].includes(s)) return "danger";
   if (["online"].includes(s)) return "info";

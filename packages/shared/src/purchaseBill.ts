@@ -78,7 +78,7 @@ function fmtDate(dateStr: string): string {
   return `${dd}/${mm}/${d.getFullYear()}`;
 }
 
-export function openPurchaseBill(input: PurchaseBillInput): void {
+export function openPurchaseBill(input: PurchaseBillInput, targetWindow?: Window | null): void {
   const { shop } = input;
 
   const itemRows = input.items.map((item, i) => {
@@ -564,8 +564,11 @@ ${input.mode === "view" ? "" : "<script>window.onload = () => window.print();</s
 </body>
 </html>`;
 
-  const win = window.open("", "_blank", "width=960,height=1000");
-  if (!win) return;
+  const win = targetWindow !== undefined ? targetWindow : window.open("", "_blank", "width=960,height=1000");
+  if (!win) {
+    alert("Your browser blocked the invoice popup. Please allow popups for this site and try again.");
+    return;
+  }
   win.document.write(html);
   win.document.close();
 }

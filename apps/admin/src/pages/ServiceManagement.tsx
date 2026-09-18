@@ -56,7 +56,7 @@ export function ServiceManagement() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">Service Management</h1>
         <button className="btn-primary" onClick={() => setShowForm(true)}>
           <Plus size={14} /> Add Service

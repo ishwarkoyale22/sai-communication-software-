@@ -94,7 +94,7 @@ export function Payments() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">Payment Management</h1>
         <ExportExcelButton
           rows={filtered.map((r) => ({

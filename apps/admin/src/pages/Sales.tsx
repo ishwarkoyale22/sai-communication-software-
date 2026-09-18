@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { formatCurrency, formatDateTime, generateSimpleInvoicePdf, openRetailTaxInvoice } from "@sai/shared";
+import { formatCurrency, formatDateTime, generateSimpleInvoicePdf, openRetailTaxInvoice, openBlankInvoiceWindow } from "@sai/shared";
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
@@ -384,6 +384,9 @@ export function Sales() {
   // "Print" button opens; generateSimpleInvoicePdf above is only used for
   // the plain "Download" PDF, which is a separate, simpler artifact.
   async function printGstInvoice(sale: Sale, mode: "print" | "view" = "print") {
+    // Opened synchronously, still inside the click's user-gesture window —
+    // opening it after the await below would get silently popup-blocked.
+    const win = openBlankInvoiceWindow();
     setInvoiceLoadingId(sale.id);
     try {
       // sales_items on the live DB has item_name/quantity/total_price plus
@@ -412,8 +415,9 @@ export function Sales() {
         totalAmount: sale.final_amount,
         shop: SHOP,
         mode,
-      });
+      }, win);
     } catch (err: any) {
+      win?.close();
       alert(err?.message || "Failed to generate GST invoice.");
     } finally {
       setInvoiceLoadingId(null);
@@ -428,7 +432,7 @@ export function Sales() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">Sales & Invoices</h1>
         <div className="flex gap-2">
           <ExportExcelButton
