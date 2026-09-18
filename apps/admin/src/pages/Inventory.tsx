@@ -1055,12 +1055,12 @@ export function Inventory() {
         </div>
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <input
           placeholder="Search name or model..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="w-72 rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-brand-primary"
+          className="w-full rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-brand-primary sm:w-72"
         />
         <select
           value={category}
