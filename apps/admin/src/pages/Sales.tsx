@@ -356,6 +356,19 @@ export function Sales() {
       // Hampers: re-read live stock right before selling (the picker's numbers
       // may be minutes old) and check the WHOLE cart at once — hamper
       // components can overlap with ordinary lines and with each other.
+      // Same product on several cart lines: check the combined quantity against live stock too,
+      // otherwise each line passes alone and the later deduction would fail after the sale exists.
+      {
+        const combined = new Map<string, number>();
+        for (const l of cart) if (!l.unit_id) combined.set(l.inventory_id, (combined.get(l.inventory_id) ?? 0) + l.quantity);
+        if (combined.size > 0) {
+          const { data: liveRows } = await supabase.from("inventory").select("id, name, model, stock").in("id", [...combined.keys()]);
+          for (const r of (liveRows as { id: string; name: string; model: string; stock: number | null }[]) ?? []) {
+            const wanted = combined.get(r.id) ?? 0;
+            if ((r.stock ?? 0) < wanted) throw new Error(`Not enough stock for "${r.name} ${r.model ?? ""}": the cart needs ${wanted} but only ${r.stock ?? 0} in stock.`);
+          }
+        }
+      }
       if (hamperCart.length > 0) {
         const fresh = await fetchHamperCatalog(supabase, { activeOnly: true });
         const freshById = new Map<string, ComponentInventory>(fresh.inventory.map((i) => [i.id, i]));
@@ -549,7 +562,8 @@ export function Sales() {
         if (!item) continue;
         // Relative, atomic decrement — never "snapshot - qty", which would overwrite
         // a hamper deduction made a moment ago for the same product.
-        await supabase.rpc("decrement_inventory_stock", { p_inventory_id: l.inventory_id, p_qty: l.quantity });
+        const { error: decErr } = await supabase.rpc("decrement_inventory_stock", { p_inventory_id: l.inventory_id, p_qty: l.quantity });
+        if (decErr) throw new Error(decErr.message);
       }
 
       // Best-effort — one notification per completed sale (not per line),

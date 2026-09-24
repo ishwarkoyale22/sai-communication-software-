@@ -85,6 +85,11 @@ begin
   if not found or s.payment_method <> 'emi' then
     return new;
   end if;
+  -- Only for live sales: a backup restore re-inserts old sale lines and restores
+  -- finance_transactions itself, so drafting here would duplicate them.
+  if s.created_at < now() - interval '10 minutes' then
+    return new;
+  end if;
   if exists (select 1 from public.finance_transactions where sale_id = s.id) then
     return new;
   end if;
@@ -260,7 +265,7 @@ create trigger trg_imei_return_reverse_sale after update of status on public.inv
 -- 5. Staff fixes
 -- ----------------------------------------------------------------------------
 alter table public.customers add column if not exists notes text;
-alter table public.reviews add column if not exists phone text;
+-- (reviews is publicly readable, so the reviewer's phone number is deliberately NOT stored there)
 
 create or replace function public.staff_submit_review(p_token uuid, p_customer_name text, p_phone text, p_rating integer, p_comment text)
 returns json
@@ -276,8 +281,8 @@ begin
     raise exception 'Rating must be between 1 and 5';
   end if;
 
-  insert into reviews (customer_name, phone, rating, review_text, source)
-  values (p_customer_name, p_phone, p_rating, p_comment, 'in_store')
+  insert into reviews (customer_name, rating, review_text, source)
+  values (p_customer_name, p_rating, p_comment, 'in_store')
   returning id into v_id;
 
   insert into staff_activity_log (staff_id, action, details)
