@@ -79,6 +79,19 @@ export function WebOrders() {
     }
   }
 
+  async function handlePaymentStatusChange(orderId: string, paymentStatus: string) {
+    const previous = orders.find((o) => o.id === orderId)?.payment_status;
+    setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, payment_status: paymentStatus } : o)));
+    const { error: updateErr } = await supabase
+      .from("website_orders")
+      .update({ payment_status: paymentStatus, updated_at: new Date().toISOString() })
+      .eq("id", orderId);
+    if (updateErr) {
+      alert(`Failed to update payment status: ${updateErr.message}`);
+      setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, payment_status: previous ?? "pending" } : o)));
+    }
+  }
+
   async function handleStatusChange(orderId: string, newStatus: string) {
     setUpdatingId(orderId);
     try {
@@ -287,7 +300,16 @@ export function WebOrders() {
                           <CreditCard className="size-3 text-gray-400" />
                           <span className="capitalize">{order.payment_method}</span>
                         </div>
-                        <div className="text-[10px] text-gray-400 capitalize">{order.payment_status}</div>
+                        <select
+                          className="input !w-auto !py-0.5 !text-[10px] capitalize"
+                          value={order.payment_status}
+                          title="Payment is collected at the shop — set this when the customer has paid"
+                          onChange={(e) => handlePaymentStatusChange(order.id, e.target.value)}
+                        >
+                          <option value="pending">Pending</option>
+                          <option value="partial">Partial</option>
+                          <option value="paid">Paid</option>
+                        </select>
                       </td>
                       <td className="font-semibold text-gray-900">{formatCurrency(order.total_amount)}</td>
                       <td>
