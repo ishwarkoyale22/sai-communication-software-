@@ -165,7 +165,7 @@ export function Dashboard() {
       { data: giftRows },
     ] = await Promise.all([
       supabase.from("sales").select("id, final_amount, payment_method, staff_id, created_at").gte("created_at", yearAgo.toISOString()),
-      supabase.from("sales_items").select("sale_id, inventory_id, item_name, quantity, total_price"),
+      supabase.from("sales_items").select("sale_id, inventory_id, item_name, quantity, total_price, sales!inner(created_at)").gte("sales.created_at", yearAgo.toISOString()),
       supabase.from("inventory").select("id, name, category, price, cost_price, stock, created_at").eq("is_active", true),
       supabase.from("finance_transactions").select("id, finance_amount, finance_date, sale_id").gte("finance_date", yearAgo.toISOString().slice(0, 10)),
       supabase.from("repair_enquiries").select("id", { count: "exact", head: true }).eq("status", "pending"),

@@ -1,5 +1,3 @@
-import * as XLSX from "xlsx";
-
 /**
  * Universal "Export Excel" utility — implement once, use on every table page.
  *
@@ -7,11 +5,14 @@ import * as XLSX from "xlsx";
  * @param fileName File name without extension, e.g. "products-2026-08-27"
  * @param sheetName Optional sheet name (defaults to "Sheet1")
  */
-export function exportToExcel<T extends Record<string, unknown>>(
+export async function exportToExcel<T extends Record<string, unknown>>(
   rows: T[],
   fileName: string,
   sheetName = "Sheet1"
-): void {
+): Promise<void> {
+  // Loaded on click, not on page load: the spreadsheet library is ~130 kB (gzip) and used to be
+  // downloaded by every page that merely shows an Export button.
+  const XLSX = await import("xlsx");
   const worksheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);

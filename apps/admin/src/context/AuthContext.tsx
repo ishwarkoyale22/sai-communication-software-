@@ -12,6 +12,29 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+const ADMIN_CACHE_KEY = "sai_admin_verified";
+
+function readAdminCache(userId: string): boolean {
+  try {
+    const raw = localStorage.getItem(ADMIN_CACHE_KEY);
+    if (!raw) return false;
+    const v = JSON.parse(raw) as { userId?: string; isAdmin?: boolean };
+    return v.userId === userId && v.isAdmin === true;
+  } catch {
+    return false;
+  }
+}
+
+function writeAdminCache(userId: string | null, isAdmin: boolean) {
+  try {
+    if (userId && isAdmin) localStorage.setItem(ADMIN_CACHE_KEY, JSON.stringify({ userId, isAdmin: true }));
+    else localStorage.removeItem(ADMIN_CACHE_KEY);
+  } catch {
+    /* storage unavailable — just skip the cache */
+  }
+}
+
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -40,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         checkAdmin(newSession.user.id);
       } else {
         setIsAdmin(false);
+        writeAdminCache(null, false);
         setLoading(false);
       }
     });
@@ -52,6 +76,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // (Clearing it here made the app briefly show "Not authorized" while the check was still running.)
     if (lastCheckedUserId.current === userId) return;
     lastCheckedUserId.current = userId;
+    // Fast path: this browser already verified this user as an admin. Show the app right away and
+    // re-verify in the background (data access is enforced by the database either way; a revoked
+    // admin is switched off as soon as the check below comes back).
+    const remembered = readAdminCache(userId);
+    if (remembered) {
+      setIsAdmin(true);
+      setLoading(false);
+    }
     // Admin status is decided ONLY by profiles.role — no email-pattern
     // guessing, no auto-granting on missing/error. A prior version of this
     // function granted admin to any account whose email didn't end in
@@ -63,7 +95,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // and the (already publicly-known) user id, so this is safe to leave
     // in the console while we're tracking down the write-access bug.
     console.info("[auth] checkAdmin:", { userId, profileFound: !!data, role: data?.role, error: error?.message });
-    setIsAdmin(data?.role === "admin");
+    const admin = data?.role === "admin";
+    writeAdminCache(userId, admin);
+    setIsAdmin(admin);
     setLoading(false);
   }
 
@@ -94,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
+    writeAdminCache(null, false);
     await supabase.auth.signOut();
     setSession(null);
     setIsAdmin(false);

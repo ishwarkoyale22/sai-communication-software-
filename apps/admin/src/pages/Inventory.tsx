@@ -4,7 +4,6 @@ import { formatCurrency, validateImei, normalizeImei, softDelete } from "@sai/sh
 import type { InventoryUnit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
-import * as XLSX from "xlsx";
 import { Html5Qrcode } from "html5-qrcode";
 
 import { uploadProductImage } from "../lib/uploadImage";
@@ -635,6 +634,7 @@ export function Inventory() {
     setSerialsModalLoading(true);
     try {
       const buf = await file.arrayBuffer();
+      const XLSX = await import("xlsx");
       const wb = XLSX.read(buf);
       const sheet = wb.Sheets[wb.SheetNames[0]];
       const raw: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
