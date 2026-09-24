@@ -48,10 +48,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function checkAdmin(userId: string) {
-    if (lastCheckedUserId.current === userId) {
-      setLoading(false);
-      return;
-    }
+    // Already checked or in flight: the call that started it clears `loading` when it finishes.
+    // (Clearing it here made the app briefly show "Not authorized" while the check was still running.)
+    if (lastCheckedUserId.current === userId) return;
     lastCheckedUserId.current = userId;
     // Admin status is decided ONLY by profiles.role — no email-pattern
     // guessing, no auto-granting on missing/error. A prior version of this

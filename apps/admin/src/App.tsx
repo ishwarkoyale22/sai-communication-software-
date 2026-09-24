@@ -46,6 +46,7 @@ const ClientReports = lazy(() => import("./pages/ClientReports").then((m) => ({ 
 const Reviews = lazy(() => import("./pages/Reviews").then((m) => ({ default: m.Reviews })));
 const Brands = lazy(() => import("./pages/Brands").then((m) => ({ default: m.Brands })));
 const ServiceManagement = lazy(() => import("./pages/ServiceManagement").then((m) => ({ default: m.ServiceManagement })));
+const ReturnRequests = lazy(() => import("./pages/ReturnRequests").then((m) => ({ default: m.ReturnRequests })));
 const WebOrders = lazy(() => import("./pages/WebOrders").then((m) => ({ default: m.WebOrders })));
 const BackupRestore = lazy(() => import("./pages/BackupRestore").then((m) => ({ default: m.BackupRestore })));
 const Gifts = lazy(() => import("./pages/Gifts").then((m) => ({ default: m.Gifts })));
@@ -148,6 +149,7 @@ export default function App() {
                 <Route path="/imei-search" element={<ImeiSearch />} />
                 <Route path="/sales" element={<Sales />} />
                 <Route path="/web-orders" element={<WebOrders />} />
+                <Route path="/return-requests" element={<ReturnRequests />} />
                 <Route path="/customers" element={<Customers />} />
                 <Route path="/birthdays" element={<Birthdays />} />
                 <Route path="/enquiries" element={<Enquiries />} />
