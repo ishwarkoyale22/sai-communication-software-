@@ -33,8 +33,10 @@ import {
   Search,
   ArrowLeftRight,
   DatabaseBackup,
+  Sparkles,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { NotificationBell } from "./NotificationBell";
 
 const NAV_GROUPS: {
   label: string;
@@ -54,6 +56,7 @@ const NAV_GROUPS: {
       { to: "/all-transactions", label: "All Transactions", icon: ArrowLeftRight },
       { to: "/web-orders", label: "Website Orders", icon: ShoppingBag },
       { to: "/gift-hampers", label: "Gift Hampers", icon: Gift },
+      { to: "/gifts", label: "Gifts", icon: Sparkles },
       { to: "/brands", label: "Brands", icon: Tag },
       { to: "/services", label: "Service Management", icon: Wand2 },
       { to: "/offers", label: "Offers", icon: Tag },
@@ -67,6 +70,7 @@ const NAV_GROUPS: {
       { to: "/birthdays", label: "Birthday Reminders", icon: Cake },
       { to: "/enquiries", label: "Enquiries", icon: MessageSquareText },
       { to: "/client-reports", label: "Client Reports", icon: FileText },
+      { to: "/finance-reports", label: "Finance Reports", icon: FileText },
       { to: "/reviews", label: "Reviews", icon: Star },
       { to: "/staff", label: "Staff", icon: UserCog },
       { to: "/staff-portal", label: "Staff Portal", icon: ListChecks },
@@ -249,11 +253,14 @@ export function Layout() {
             </button>
             <div className="truncate font-serif text-sm font-medium text-gray-700">Admin Portal</div>
           </div>
-          <div
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow-sm"
-            style={{ background: "linear-gradient(155deg, #2A1420, #1F3A8A)", color: "#F5D9A8" }}
-          >
-            SC
+          <div className="flex items-center gap-2">
+            <NotificationBell />
+            <div
+              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow-sm"
+              style={{ background: "linear-gradient(155deg, #2A1420, #1F3A8A)", color: "#F5D9A8" }}
+            >
+              SC
+            </div>
           </div>
         </header>
         <main ref={mainRef} className="flex-1 overflow-y-auto p-3 sm:p-5">

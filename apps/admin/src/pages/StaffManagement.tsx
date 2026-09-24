@@ -13,11 +13,12 @@ interface Staff {
   role: string;
   salary: number | null;
   joined_date: string | null;
+  date_of_birth: string | null;
   is_active: boolean;
   pin: string | null;
 }
 
-const emptyForm = { name: "", role: "staff", phone: "", email: "", salary: 0, joined_date: "", pin: "" };
+const emptyForm = { name: "", role: "sales", phone: "", email: "", salary: 0, joined_date: "", date_of_birth: "", pin: "" };
 
 export function StaffManagement() {
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -70,6 +71,7 @@ export function StaffManagement() {
       email: form.email.trim() || null,
       salary: form.salary || null,
       joined_date: form.joined_date || null,
+      date_of_birth: form.date_of_birth || null,
       pin: form.pin,
       is_active: true,
     });
@@ -111,6 +113,7 @@ export function StaffManagement() {
         email: editingStaff.email,
         salary: editingStaff.salary,
         joined_date: editingStaff.joined_date,
+        date_of_birth: editingStaff.date_of_birth,
         pin: editingStaff.pin,
         is_active: editingStaff.is_active,
       })
@@ -240,12 +243,16 @@ export function StaffManagement() {
                   value={editingStaff ? editingStaff.role : form.role}
                   onChange={(e) => (editingStaff ? setEditingStaff({ ...editingStaff, role: e.target.value }) : setForm({ ...form, role: e.target.value }))}
                 >
-                  <option value="staff">Staff</option>
-                  <option value="cashier">Cashier / Billing</option>
-                  <option value="technician">Technician / Repairs</option>
-                  <option value="manager">Store Manager</option>
-                  <option value="sales">Sales Associate</option>
+                  <option value="technician">Technician (Repair Portal)</option>
+                  <option value="sales">Sales Person (Sales Portal)</option>
+                  <option value="receptionist">Receptionist (Reception Portal)</option>
+                  <option value="staff">Staff (legacy — generic portal)</option>
+                  <option value="cashier">Cashier / Billing (legacy — generic portal)</option>
+                  <option value="manager">Store Manager (legacy — generic portal)</option>
                 </select>
+                <p className="mt-1 text-[11px] text-gray-400">
+                  Technician, Sales Person and Receptionist each get their own Staff Portal dashboard. Legacy roles keep the original generic portal.
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
@@ -306,6 +313,15 @@ export function StaffManagement() {
                     onChange={(e) => (editingStaff ? setEditingStaff({ ...editingStaff, joined_date: e.target.value }) : setForm({ ...form, joined_date: e.target.value }))}
                   />
                 </div>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-600">Date of Birth</label>
+                <input
+                  type="date"
+                  className="input w-full"
+                  value={editingStaff ? editingStaff.date_of_birth ?? "" : form.date_of_birth}
+                  onChange={(e) => (editingStaff ? setEditingStaff({ ...editingStaff, date_of_birth: e.target.value }) : setForm({ ...form, date_of_birth: e.target.value }))}
+                />
               </div>
               {editingStaff && (
                 <label className="flex items-center gap-2 pt-1 text-sm text-gray-700 cursor-pointer">

@@ -1,12 +1,31 @@
 import { useEffect, useState } from "react";
-import { softDelete } from "@sai/shared";
+import { softDelete, formatCurrency } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Plus, Trash2, X, Tag } from "lucide-react";
+import { Plus, Trash2, X, Tag, Package } from "lucide-react";
 
 type OfferType = "percentage" | "bogo" | "rupee_off" | "coupon";
 type DisplayMode = "image" | "popup" | "hero_banner";
+
+interface InventoryOption {
+  id: string;
+  name: string;
+  model: string;
+  price: number;
+  brand_id: string | null;
+  is_active: boolean;
+}
+interface OfferProductLink {
+  id: string;
+  offer_id: string;
+  inventory_id: string;
+}
+interface Brand {
+  id: string;
+  name: string;
+  is_active: boolean;
+}
 
 interface Offer {
   id: string;
@@ -54,12 +73,19 @@ export function Offers() {
   const [form, setForm] = useState(emptyForm);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [inventory, setInventory] = useState<InventoryOption[]>([]);
+  const [offerProducts, setOfferProducts] = useState<OfferProductLink[]>([]);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [managing, setManaging] = useState<Offer | null>(null);
+  const [pickBrand, setPickBrand] = useState("");
+  const [pickProductId, setPickProductId] = useState("");
 
   useEffect(() => {
     load();
     const channel = supabase
       .channel("offers-page")
       .on("postgres_changes", { event: "*", schema: "public", table: "offers" }, load)
+      .on("postgres_changes", { event: "*", schema: "public", table: "offer_products" }, load)
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -67,8 +93,44 @@ export function Offers() {
   }, []);
 
   async function load() {
-    const { data } = await supabase.from("offers").select("*").order("created_at", { ascending: false });
-    setOffers((data as Offer[]) ?? []);
+    const [{ data: o }, { data: inv }, { data: op }, { data: br }] = await Promise.all([
+      supabase.from("offers").select("*").order("created_at", { ascending: false }),
+      supabase.from("inventory").select("id, name, model, price, brand_id, is_active").order("name"),
+      supabase.from("offer_products").select("id, offer_id, inventory_id"),
+      supabase.from("brands").select("id, name, is_active").order("name"),
+    ]);
+    setOffers((o as Offer[]) ?? []);
+    setInventory((inv as InventoryOption[]) ?? []);
+    setOfferProducts((op as OfferProductLink[]) ?? []);
+    setBrands((br as Brand[]) ?? []);
+  }
+
+  function productsFor(offerId: string) {
+    return offerProducts.filter((p) => p.offer_id === offerId);
+  }
+  function inventoryItem(id: string) {
+    return inventory.find((i) => i.id === id);
+  }
+  function brandName(id: string | null) {
+    return brands.find((b) => b.id === id)?.name ?? "-";
+  }
+
+  async function addProductToOffer() {
+    if (!managing || !pickProductId) return;
+    if (productsFor(managing.id).some((p) => p.inventory_id === pickProductId)) return;
+    setError(null);
+    const { error: insertErr } = await supabase.from("offer_products").insert({ offer_id: managing.id, inventory_id: pickProductId });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
+    setPickProductId("");
+    load();
+  }
+
+  async function removeProductFromOffer(id: string) {
+    await supabase.from("offer_products").delete().eq("id", id);
+    load();
   }
 
   function isLive(o: Offer) {
@@ -184,7 +246,26 @@ export function Offers() {
               {o.offer_type === "coupon" && o.discount_value != null && <span>₹{o.discount_value} off</span>}
               <span className="capitalize text-gray-400">{(o.display_mode ?? "hero_banner").replace("_", " ")}</span>
             </div>
+            <div className="mt-2 space-y-0.5 text-xs text-gray-500">
+              {productsFor(o.id).slice(0, 4).map((p) => {
+                const item = inventoryItem(p.inventory_id);
+                return <div key={p.id} className="truncate">{item ? `${item.name} ${item.model}` : "Deleted product"}</div>;
+              })}
+              {productsFor(o.id).length > 4 && <div>+{productsFor(o.id).length - 4} more</div>}
+              {productsFor(o.id).length === 0 && <span className="italic text-gray-400">No products linked yet</span>}
+            </div>
             <div className="mt-3 flex justify-end gap-1">
+              <button
+                className="btn-secondary !py-0.5 text-xs"
+                onClick={() => {
+                  setError(null);
+                  setPickBrand("");
+                  setPickProductId("");
+                  setManaging(o);
+                }}
+              >
+                <Package size={12} /> Manage Products ({productsFor(o.id).length})
+              </button>
               <button className="btn-ghost !py-0.5 text-xs" onClick={() => toggleActive(o)}>
                 {o.is_active ? "Deactivate" : "Activate"}
               </button>
@@ -261,6 +342,71 @@ export function Offers() {
             <div className="flex justify-end gap-2 pt-2">
               <button className="btn-ghost" onClick={() => setShowForm(false)} disabled={saving}>Cancel</button>
               <button className="btn-primary" onClick={addOffer} disabled={saving}>{saving ? "Saving..." : "Save"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {managing && (
+        <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
+          <div className="card w-full max-w-lg p-5 space-y-3">
+            <div className="flex items-center justify-between border-b border-border pb-2">
+              <h2 className="text-sm font-semibold text-gray-800">{managing.title} — Products</h2>
+              <button onClick={() => setManaging(null)}><X size={16} /></button>
+            </div>
+
+            {error && <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-brand-danger">{error}</div>}
+
+            <div className="max-h-64 space-y-1.5 overflow-y-auto">
+              {productsFor(managing.id).map((p) => {
+                const item = inventoryItem(p.inventory_id);
+                return (
+                  <div key={p.id} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm">
+                    <span className="flex-1 truncate">{item ? `${item.name} ${item.model}` : "Deleted product"}</span>
+                    <span className="w-24 text-right font-medium">{item ? formatCurrency(item.price) : "-"}</span>
+                    <button className="ml-2 text-brand-danger" onClick={() => removeProductFromOffer(p.id)}>
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                );
+              })}
+              {productsFor(managing.id).length === 0 && (
+                <p className="text-sm text-gray-400">No products added yet — add any number below.</p>
+              )}
+            </div>
+
+            <div className="space-y-2 border-t border-border pt-3">
+              <div className="flex gap-2">
+                <select
+                  className="input w-40"
+                  value={pickBrand}
+                  onChange={(e) => {
+                    setPickBrand(e.target.value);
+                    setPickProductId("");
+                  }}
+                >
+                  <option value="">All brands</option>
+                  {brands.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))}
+                </select>
+                <select className="input flex-1" value={pickProductId} onChange={(e) => setPickProductId(e.target.value)}>
+                  <option value="">Select a product to add...</option>
+                  {inventory
+                    .filter((i) => !productsFor(managing.id).some((p) => p.inventory_id === i.id))
+                    .filter((i) => !pickBrand || i.brand_id === pickBrand)
+                    .map((i) => (
+                      <option key={i.id} value={i.id} disabled={!i.is_active}>
+                        {brandName(i.brand_id)} {i.name} {i.model} — {formatCurrency(i.price)}{!i.is_active ? " — inactive" : ""}
+                      </option>
+                    ))}
+                </select>
+                <button className="btn-secondary" onClick={addProductToOffer} disabled={!pickProductId}>Add</button>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button className="btn-primary" onClick={() => setManaging(null)}>Done</button>
             </div>
           </div>
         </div>

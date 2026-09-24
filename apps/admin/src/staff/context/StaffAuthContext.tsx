@@ -12,15 +12,37 @@ export interface StaffLite {
   phone: string;
 }
 
+/** Where a staff member lands after login — the 3 new role portals share the
+ * one Staff Portal shell/layout, just with role-specific nav content, so this
+ * only needs to pick a landing route, not a separate app. Anything outside
+ * the 3 new roles (legacy 'staff'/'cashier' accounts) keeps the original
+ * generic portal — no forced migration of existing accounts. */
+export function portalPathForRole(role?: string | null): string {
+  if (role === "technician") return "/portal/technician";
+  if (role === "sales") return "/portal/sales";
+  if (role === "receptionist") return "/portal/reception";
+  return "/portal";
+}
+
+export interface BirthdayEntry {
+  id: string;
+  name: string;
+  is_self: boolean;
+}
+
 interface StaffAuthState {
   staff: StaffLite | null;
   token: string | null;
   openAttendance: Attendance | null;
+  todaysBirthdays: BirthdayEntry[];
+  unreadNotifications: number;
   loading: boolean;
-  loginWithPin: (phone: string, pin: string) => Promise<{ error?: string }>;
+  loginWithPin: (phone: string, pin: string, expectedRole?: string) => Promise<{ error?: string; staff?: StaffLite }>;
   clockOut: () => Promise<void>;
   signOut: () => void;
   refreshAttendance: () => Promise<void>;
+  sendBirthdayWish: (toStaffId: string) => Promise<void>;
+  refreshNotifications: () => Promise<void>;
 }
 
 const Ctx = createContext<StaffAuthState | null>(null);
@@ -29,6 +51,8 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const [staff, setStaff] = useState<StaffLite | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [openAttendance, setOpenAttendance] = useState<Attendance | null>(null);
+  const [todaysBirthdays, setTodaysBirthdays] = useState<BirthdayEntry[]>([]);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,6 +65,8 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
           setStaff(parsed);
           setToken(savedToken);
           refreshAttendanceFor(savedToken);
+          refreshBirthdaysFor(savedToken);
+          refreshNotificationsFor(savedToken);
         }
       } catch {
         localStorage.removeItem(STAFF_KEY);
@@ -49,6 +75,23 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     }
     setLoading(false);
   }, []);
+
+  // Live badge updates — a task/leave-decision/report-status/birthday-wish
+  // notification landing while the app is open should bump the badge right
+  // away, not just after the next login or a manual page visit.
+  useEffect(() => {
+    if (!staff || !token) return;
+    const channel = supabase
+      .channel("staff-notifications-badge")
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: `staff_id=eq.${staff.id}` }, () =>
+        refreshNotificationsFor(token)
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [staff?.id, token]);
 
   async function refreshAttendanceFor(tok: string) {
     const { data } = await supabase.rpc("staff_get_attendance", { p_token: tok });
@@ -60,12 +103,41 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     if (token) await refreshAttendanceFor(token);
   }
 
-  async function loginWithPin(phone: string, pin: string) {
+  async function refreshBirthdaysFor(tok: string) {
+    const { data } = await supabase.rpc("staff_get_birthdays_today", { p_token: tok });
+    setTodaysBirthdays((data as BirthdayEntry[]) ?? []);
+  }
+
+  async function sendBirthdayWish(toStaffId: string) {
+    if (!token) return;
+    await supabase.rpc("staff_send_birthday_wish", { p_token: token, p_to_staff_id: toStaffId });
+  }
+
+  async function refreshNotificationsFor(tok: string) {
+    const { data } = await supabase.rpc("staff_get_notifications", { p_token: tok });
+    setUnreadNotifications(((data as { is_read: boolean }[]) ?? []).filter((n) => !n.is_read).length);
+  }
+
+  async function refreshNotifications() {
+    if (token) await refreshNotificationsFor(token);
+  }
+
+  async function loginWithPin(phone: string, pin: string, expectedRole?: string) {
     const cleanPhone = phone.trim();
     const cleanPin = pin.trim();
 
     if (!cleanPhone || cleanPin.length !== 4) {
       return { error: "Please enter your 10-digit phone number and 4-digit PIN." };
+    }
+
+    // Live location is mandatory: ask for it BEFORE anything else, so a staff
+    // member who blocks it never gets a session at all.
+    const { lat, lng } = await getGeolocation();
+    if (lat == null || lng == null) {
+      return {
+        error:
+          "Login blocked: please turn on live location and tap Allow when your browser asks. If you blocked it earlier, click the lock icon next to the address bar, set Location to Allow, then try again.",
+      };
     }
 
     try {
@@ -86,21 +158,21 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       }
 
       const staffLite: StaffLite = result.staff;
+      const portalRoles = ["technician", "sales", "receptionist"];
+      if (expectedRole && portalRoles.includes(staffLite.role) && staffLite.role !== expectedRole) {
+        return { error: "Login failed: this account is not registered for the selected role. Choose your own role and try again." };
+      }
       setStaff(staffLite);
       setToken(result.token);
       localStorage.setItem(STAFF_KEY, JSON.stringify(staffLite));
       localStorage.setItem(TOKEN_KEY, result.token);
 
-      try {
-        const { lat, lng } = await getGeolocation();
-        await supabase.rpc("staff_clock_in", { p_token: result.token, p_lat: lat, p_lng: lng });
-      } catch {
-        // Geolocation denied/unavailable — clock in without coordinates.
-        await supabase.rpc("staff_clock_in", { p_token: result.token });
-      }
+      await supabase.rpc("staff_clock_in", { p_token: result.token, p_lat: lat, p_lng: lng });
 
       await refreshAttendanceFor(result.token);
-      return {};
+      await refreshBirthdaysFor(result.token);
+      await refreshNotificationsFor(result.token);
+      return { staff: staffLite };
     } catch (err: any) {
       return { error: err?.message || "Failed to sign in. Please try again." };
     }
@@ -123,10 +195,27 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     setStaff(null);
     setToken(null);
     setOpenAttendance(null);
+    setTodaysBirthdays([]);
+    setUnreadNotifications(0);
   }
 
   return (
-    <Ctx.Provider value={{ staff, token, openAttendance, loading, loginWithPin, clockOut, signOut, refreshAttendance }}>
+    <Ctx.Provider
+      value={{
+        staff,
+        token,
+        openAttendance,
+        todaysBirthdays,
+        unreadNotifications,
+        loading,
+        loginWithPin,
+        clockOut,
+        signOut,
+        refreshAttendance,
+        sendBirthdayWish,
+        refreshNotifications,
+      }}
+    >
       {children}
     </Ctx.Provider>
   );

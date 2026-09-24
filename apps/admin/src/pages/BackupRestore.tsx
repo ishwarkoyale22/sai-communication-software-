@@ -39,6 +39,7 @@ export function BackupRestore() {
   const [bin, setBin] = useState<RecycleBinRow[]>([]);
   const [binLoading, setBinLoading] = useState(false);
   const [actingId, setActingId] = useState<string | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   useEffect(() => {
     if (tab === "bin") loadBin();
@@ -114,6 +115,47 @@ export function BackupRestore() {
     loadBin();
   }
 
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const selectedRows = bin.filter((r) => selected.has(r.id));
+  const allSelected = bin.length > 0 && selectedRows.length === bin.length;
+
+  function toggleOne(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleBulkRestore() {
+    if (selectedRows.length === 0) return;
+    setBulkBusy(true);
+    let failed = 0;
+    for (const row of selectedRows) {
+      const { error } = await restoreFromBin(supabase, row);
+      if (error) failed++;
+    }
+    setBulkBusy(false);
+    setSelected(new Set());
+    setMessage(
+      failed
+        ? { type: "error", text: `${selectedRows.length - failed} restored, ${failed} failed.` }
+        : { type: "success", text: `${selectedRows.length} item(s) restored.` }
+    );
+    loadBin();
+  }
+
+  async function handleBulkDelete() {
+    if (selectedRows.length === 0) return;
+    if (!confirm(`Permanently delete ${selectedRows.length} item(s)? They cannot be recovered after this.`)) return;
+    setBulkBusy(true);
+    for (const row of selectedRows) await permanentlyDelete(supabase, row.id);
+    setBulkBusy(false);
+    setSelected(new Set());
+    loadBin();
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -177,9 +219,28 @@ export function BackupRestore() {
 
       {tab === "bin" && (
         <div className="card overflow-x-auto">
+          {selectedRows.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 text-sm">
+              <span className="text-gray-600">{selectedRows.length} selected</span>
+              <button className="btn-secondary !px-2 !py-1 text-xs" disabled={bulkBusy} onClick={handleBulkRestore}>
+                <RotateCcw size={12} /> Restore selected
+              </button>
+              <button className="btn-ghost !px-2 !py-1 text-xs text-brand-danger" disabled={bulkBusy} onClick={handleBulkDelete}>
+                <Trash2 size={12} /> Delete selected
+              </button>
+            </div>
+          )}
           <table className="table-base">
             <thead>
               <tr>
+                <th className="w-8">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all"
+                    checked={allSelected}
+                    onChange={() => setSelected(allSelected ? new Set() : new Set(bin.map((r) => r.id)))}
+                  />
+                </th>
                 <th>Type</th>
                 <th>Name</th>
                 <th>Deleted</th>
@@ -189,6 +250,9 @@ export function BackupRestore() {
             <tbody>
               {bin.map((row) => (
                 <tr key={row.id}>
+                  <td>
+                    <input type="checkbox" aria-label="Select row" checked={selected.has(row.id)} onChange={() => toggleOne(row.id)} />
+                  </td>
                   <td>{TABLE_LABELS[row.table_name] ?? row.table_name}</td>
                   <td className="font-medium">{row.label ?? String(row.data.name ?? row.data.title ?? row.record_id)}</td>
                   <td className="text-gray-500">{new Date(row.deleted_at).toLocaleString("en-IN")}</td>
@@ -206,7 +270,7 @@ export function BackupRestore() {
               ))}
               {!binLoading && bin.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-8 text-center text-gray-400">
+                  <td colSpan={5}className="py-8 text-center text-gray-400">
                     Nothing here — deleted products, staff, brands and similar records show up here for recovery.
                   </td>
                 </tr>

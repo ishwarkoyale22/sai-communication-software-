@@ -5,8 +5,11 @@
  * Round Off, Invoice Amount in Words, Received / Balance, Payment Mode,
  * Terms & Conditions, and Authorized Signatory.
  *
- * GST is derived at print time: each line's price is GST-INCLUSIVE at 18%
- * (9% CGST + 9% SGST), standard practice for retail electronics in India.
+ * GST is derived at print time: each line's price is GST-INCLUSIVE at the
+ * sale's chosen rate (default 18%, split evenly as CGST + SGST) — see
+ * `gstRatePercent`. 18% was previously hardcoded; it's now selectable per
+ * sale in New Sale, and the rate used is stored on the sale so a re-print
+ * later still shows the same figures.
  */
 
 export interface RetailTaxInvoiceItem {
@@ -30,6 +33,8 @@ export interface RetailTaxInvoiceInput {
   receivedAmount?: number;
   items: RetailTaxInvoiceItem[];
   totalAmount: number; // GST-inclusive grand total (pre-rounding)
+  /** GST %, e.g. 18 for 18% (9% CGST + 9% SGST split). Defaults to 18 — the rate this invoice always used before it became selectable per sale. */
+  gstRatePercent?: number;
   shop: {
     name: string;
     address: string;
@@ -42,7 +47,7 @@ export interface RetailTaxInvoiceInput {
   mode?: "print" | "view";
 }
 
-const GST_RATE = 0.18;
+const DEFAULT_GST_RATE_PERCENT = 18;
 
 function numberToWords(num: number): string {
   const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
@@ -100,6 +105,9 @@ export function openBlankInvoiceWindow(): Window | null {
 
 export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?: Window | null): void {
   const { shop } = input;
+  const gstRatePercent = input.gstRatePercent ?? DEFAULT_GST_RATE_PERCENT;
+  const GST_RATE = gstRatePercent / 100;
+  const halfRatePercent = gstRatePercent / 2;
 
   // ── Line item rows ──────────────────────────────────────────────────────────
   const itemRows = input.items.map((item, i) => {
@@ -155,9 +163,9 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
     return `<tr>
       <td>${hsn}</td>
       <td class="text-right">${fmt(g.taxable)}</td>
-      <td>9</td>
+      <td>${halfRatePercent}</td>
       <td class="text-right">${fmt(half)}</td>
-      <td>9</td>
+      <td>${halfRatePercent}</td>
       <td class="text-right">${fmt(half)}</td>
       <td class="text-right">${fmt(g.tax)}</td>
     </tr>`;

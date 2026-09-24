@@ -7,30 +7,7 @@ import { ExportExcelButton } from "../components/ExportExcelButton";
 import * as XLSX from "xlsx";
 import { Html5Qrcode } from "html5-qrcode";
 
-const IMAGE_BUCKET = "product-images";
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024; // 5MB
-const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
-
-async function uploadProductImage(file: File): Promise<string> {
-  if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
-    throw new Error("Please choose a JPG, PNG, WEBP, or GIF image.");
-  }
-  if (file.size > MAX_IMAGE_BYTES) {
-    throw new Error("Image is too large — please choose one under 5MB.");
-  }
-
-  const ext = file.name.split(".").pop() || "jpg";
-  const path = `${crypto.randomUUID()}.${ext}`;
-
-  const { error: uploadErr } = await supabase.storage.from(IMAGE_BUCKET).upload(path, file, {
-    cacheControl: "3600",
-    upsert: false,
-  });
-  if (uploadErr) throw uploadErr;
-
-  const { data } = supabase.storage.from(IMAGE_BUCKET).getPublicUrl(path);
-  return data.publicUrl;
-}
+import { uploadProductImage } from "../lib/uploadImage";
 
 interface Brand {
   id: string;
@@ -62,8 +39,8 @@ interface InventoryItem {
 
 // Must exactly match the live `inventory_category_check` constraint —
 // verified directly against the database, not guessed:
-// CHECK (category = ANY (ARRAY['Smartphones','Feature Phones','Tablets','Accessories','Refurbished']))
-const CATEGORY_OPTIONS = ["Smartphones", "Feature Phones", "Tablets", "Accessories", "Refurbished"];
+// CHECK (category = ANY (ARRAY['Smartphones','Feature Phones','Tablets','Accessories','Refurbished','Home Appliances']))
+const CATEGORY_OPTIONS = ["Smartphones", "Feature Phones", "Tablets", "Accessories", "Refurbished", "Home Appliances"];
 
 const emptyForm = {
   name: "",
@@ -381,6 +358,14 @@ export function Inventory() {
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [scannedPending, setScannedPending] = useState<{ imei_1: string; imei_2: string; serial_no: string }[]>([]);
 
+  // Product/Invoice QR scan (distinct from the IMEI/serial scanner above) —
+  // reads whatever a supplier's carton or invoice QR encodes and tries to
+  // pre-fill Name + match an existing Brand, since suppliers rarely encode
+  // a brand_id our DB would recognize directly.
+  const invoiceScannerRef = useRef<Html5Qrcode | null>(null);
+  const [invoiceScanActive, setInvoiceScanActive] = useState(false);
+  const [invoiceScanFeedback, setInvoiceScanFeedback] = useState<string | null>(null);
+
   async function handleImageFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError(null);
@@ -494,7 +479,9 @@ export function Inventory() {
 
   async function closeAddOrEditForm() {
     await stopScanner();
+    await stopInvoiceScanner();
     setScanFeedback(null);
+    setInvoiceScanFeedback(null);
     if (editingItem) setEditingItem(null);
     else setShowAddForm(false);
   }
@@ -777,6 +764,231 @@ export function Inventory() {
     await commitDraftRows(scannedPending);
   }
 
+  // ── Product / Invoice QR Scan ───────────────────────────────────────────
+  // Suppliers encode QR payloads in very different shapes: some are the
+  // government e-invoice QR (a JSON blob with GSTIN/IRN/invoice fields, no
+  // per-item brand or model), others are a supplier's own carton QR (often
+  // "key:value" pairs separated by | or ; or newlines). We try structured
+  // parsing first, then fall back to matching a known Brand name anywhere
+  // in the raw text so the product still lands under the right brand.
+  interface ParsedInvoiceQr {
+    name?: string;
+    model?: string;
+    salePrice?: number;
+    wholesalePrice?: number;
+    brandName?: string;
+    ram?: string;
+    storage?: string;
+    quantity?: number;
+    sku?: string;
+    wholesalerName?: string;
+    wholesalerPhone?: string;
+    invoiceNumber?: string;
+    invoiceDate?: string;
+  }
+
+  function parseInvoiceQrPayload(text: string): ParsedInvoiceQr {
+    const trimmed = text.trim();
+
+    // Government e-invoice QR: JSON with Seller GSTIN / IRN / doc fields —
+    // no item-level brand/model, so there's nothing product-specific to
+    // extract beyond a document reference.
+    try {
+      const json = JSON.parse(trimmed);
+      if (json && typeof json === "object") {
+        const name = json.name ?? json.Name ?? json.product ?? json.Product ?? json.itemName ?? undefined;
+        const model = json.model ?? json.Model ?? undefined;
+        const brandName = json.brand ?? json.Brand ?? undefined;
+        // "Rate"/"Price" on a wholesaler's invoice is what the shop paid
+        // (wholesale/cost price), not the retail price it'll sell at — only
+        // an explicit sale/mrp field counts as the sale price.
+        const rawSale = json.salePrice ?? json.SalePrice ?? json.mrp ?? json.Mrp ?? json.MRP ?? undefined;
+        const rawWholesale = json.wholesalePrice ?? json.WholesalePrice ?? json.costPrice ?? json.CostPrice ?? json.price ?? json.Price ?? json.rate ?? json.Rate ?? undefined;
+        const salePrice = rawSale != null ? Number(rawSale) : undefined;
+        const wholesalePrice = rawWholesale != null ? Number(rawWholesale) : undefined;
+        const rawQty = json.quantity ?? json.Quantity ?? json.qty ?? json.Qty ?? undefined;
+        const quantity = rawQty != null ? Number(rawQty) : undefined;
+        return {
+          name,
+          model,
+          brandName,
+          salePrice: Number.isFinite(salePrice as number) ? salePrice : undefined,
+          wholesalePrice: Number.isFinite(wholesalePrice as number) ? wholesalePrice : undefined,
+          ram: json.ram ?? json.RAM ?? json.Ram ?? undefined,
+          storage: json.storage ?? json.Storage ?? undefined,
+          quantity: Number.isFinite(quantity as number) ? quantity : undefined,
+          sku: json.sku ?? json.SKU ?? json.Sku ?? undefined,
+          wholesalerName: json.wholesalerName ?? json.WholesalerName ?? json.SellerName ?? json.sellerName ?? undefined,
+          wholesalerPhone: json.wholesalerPhone ?? json.WholesalerPhone ?? json.phone ?? json.Phone ?? undefined,
+          invoiceNumber: json.invoiceNumber ?? json.InvoiceNumber ?? json.DocNo ?? json.docNo ?? undefined,
+          invoiceDate: json.invoiceDate ?? json.InvoiceDate ?? json.DocDt ?? json.docDt ?? undefined,
+        };
+      }
+    } catch {
+      /* not JSON — fall through to key:value / plain-text parsing */
+    }
+
+    // "Key: value" pairs separated by newlines, |, or ;
+    const pairs: Record<string, string> = {};
+    for (const part of trimmed.split(/[|;\n]/)) {
+      const m = part.match(/^\s*([A-Za-z ]+)\s*[:=]\s*(.+?)\s*$/);
+      if (m) pairs[m[1].trim().toLowerCase()] = m[2].trim();
+    }
+    if (Object.keys(pairs).length > 0) {
+      const sale = pairs["sale price"] ?? pairs["saleprice"] ?? pairs.mrp;
+      const wholesale = pairs["wholesale price"] ?? pairs["wholesaleprice"] ?? pairs["cost price"] ?? pairs.price ?? pairs.rate;
+      const qty = pairs.quantity ?? pairs.qty;
+      return {
+        name: pairs.name ?? pairs.product ?? pairs.item,
+        model: pairs.model,
+        brandName: pairs.brand,
+        salePrice: sale ? Number(sale.replace(/[^\d.]/g, "")) : undefined,
+        wholesalePrice: wholesale ? Number(wholesale.replace(/[^\d.]/g, "")) : undefined,
+        ram: pairs.ram,
+        storage: pairs.storage,
+        quantity: qty ? Number(qty.replace(/[^\d.]/g, "")) : undefined,
+        sku: pairs.sku,
+        wholesalerName: pairs["wholesaler name"] ?? pairs["wholesaler"] ?? pairs["supplier"] ?? pairs["seller"],
+        wholesalerPhone: pairs["wholesaler phone"] ?? pairs["phone"] ?? pairs["mobile"],
+        invoiceNumber: pairs["invoice number"] ?? pairs["invoice no"] ?? pairs["invoice"],
+        invoiceDate: pairs["invoice date"] ?? pairs["date"],
+      };
+    }
+
+    // Plain text fallback — use the raw scan as the product name.
+    return { name: trimmed };
+  }
+
+  /** Best-effort — a scan without a parseable date should never block the rest of the auto-fill. */
+  function normalizeScannedDate(raw: string | undefined): string | null {
+    if (!raw) return null;
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+    // DD/MM/YYYY or DD-MM-YYYY, common on Indian invoices
+    const m = raw.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
+    if (m) return `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    return null;
+  }
+
+  async function recordWholesalerInvoiceFromScan(parsed: ParsedInvoiceQr, product: { name: string; qty: number; unitCost: number }) {
+    if (!parsed.wholesalerName) return;
+    const totalAmount = product.unitCost * product.qty;
+    const { error: invErr } = await supabase.from("wholesaler_invoices").insert({
+      wholesaler_name: parsed.wholesalerName,
+      wholesaler_phone: parsed.wholesalerPhone || null,
+      invoice_number: parsed.invoiceNumber || null,
+      items: [{ name: product.name, qty: product.qty, total_price: totalAmount }],
+      total_amount: totalAmount,
+      paid_amount: 0,
+      due_amount: totalAmount,
+      payment_status: "pending",
+      invoice_date: normalizeScannedDate(parsed.invoiceDate) || new Date().toISOString().slice(0, 10),
+      notes: "Auto-added from Add New Product QR scan",
+    });
+    if (invErr) {
+      console.error("[inventory] failed to auto-add wholesaler invoice from scan:", invErr.message);
+    }
+  }
+
+  async function startInvoiceScanner() {
+    if (invoiceScanActive) return;
+    setInvoiceScanFeedback(null);
+    try {
+      const scanner = new Html5Qrcode("invoice-scanner-region");
+      invoiceScannerRef.current = scanner;
+      setInvoiceScanActive(true);
+      await scanner.start(
+        { facingMode: "environment" },
+        { fps: 10, qrbox: 250 },
+        (decoded) => onInvoiceScanDecoded(decoded),
+        () => {
+          /* per-frame errors are noise, don't surface */
+        }
+      );
+    } catch (err: any) {
+      setInvoiceScanActive(false);
+      setInvoiceScanFeedback(err?.message || "Could not start camera — permission may be denied.");
+    }
+  }
+
+  async function stopInvoiceScanner() {
+    const scanner = invoiceScannerRef.current;
+    if (!scanner) return;
+    try {
+      await scanner.stop();
+      scanner.clear();
+    } catch {
+      /* already stopped */
+    }
+    invoiceScannerRef.current = null;
+    setInvoiceScanActive(false);
+  }
+
+  async function onInvoiceScanDecoded(text: string) {
+    const parsed = parseInvoiceQrPayload(text);
+    await stopInvoiceScanner();
+
+    // If this exact product is already in inventory, don't offer to create
+    // a duplicate — point the user at restocking the existing one instead
+    // (via Manage Serials / the stock number on the row) rather than
+    // silently filling the New Product form on top of it.
+    const nameKey = parsed.name?.trim().toLowerCase();
+    const modelKey = parsed.model?.trim().toLowerCase();
+    const existing = items.find((i) => {
+      const sameModel = modelKey && i.model.trim().toLowerCase() === modelKey;
+      const sameName = nameKey && i.name.trim().toLowerCase() === nameKey;
+      return sameModel || sameName;
+    });
+    const qty = parsed.quantity && parsed.quantity > 0 ? parsed.quantity : 1;
+
+    if (existing) {
+      // Still worth logging the purchase even though the product itself
+      // already exists — this is a restock, not a new-product scan.
+      if (parsed.wholesalerName) {
+        await recordWholesalerInvoiceFromScan(parsed, {
+          name: existing.name,
+          qty,
+          unitCost: parsed.wholesalePrice ?? 0,
+        });
+      }
+      setInvoiceScanFeedback(
+        `"${existing.name}" already exists in inventory — add stock to it instead of creating a duplicate.` +
+          (parsed.wholesalerName ? " A Wholesaler Invoice was logged for this restock." : "")
+      );
+      return;
+    }
+
+    const matchedBrand = parsed.brandName
+      ? brands.find((b) => b.name.toLowerCase() === parsed.brandName!.toLowerCase())
+      : brands.find((b) => parsed.name?.toLowerCase().includes(b.name.toLowerCase()) || text.toLowerCase().includes(b.name.toLowerCase()));
+
+    setForm((prev) => ({
+      ...prev,
+      name: parsed.name ?? prev.name,
+      model: parsed.model ?? prev.model,
+      price: parsed.salePrice ?? prev.price,
+      cost_price: parsed.wholesalePrice ?? prev.cost_price,
+      brand_id: matchedBrand?.id ?? prev.brand_id,
+      stock: parsed.quantity ?? prev.stock,
+      ram: parsed.ram && !prev.ram.includes(parsed.ram) ? [...prev.ram, parsed.ram] : prev.ram,
+      storage: parsed.storage && !prev.storage.includes(parsed.storage) ? [...prev.storage, parsed.storage] : prev.storage,
+    }));
+
+    if (parsed.wholesalerName) {
+      await recordWholesalerInvoiceFromScan(parsed, {
+        name: parsed.name ?? "Scanned product",
+        qty,
+        unitCost: parsed.wholesalePrice ?? 0,
+      });
+    }
+
+    setInvoiceScanFeedback(
+      (matchedBrand ? `New product — added under brand "${matchedBrand.name}". ` : "New product — no matching brand found, please pick one. ") +
+        "Sale Price, Wholesale Price, RAM/Storage and Quantity were filled in below where the scan had them — please confirm before saving." +
+        (parsed.wholesalerName ? " A Wholesaler Invoice was also logged from this scan." : "")
+    );
+  }
+
   async function addItem() {
     if (!form.name.trim() || !form.model.trim()) {
       setError("Product name and model are required.");
@@ -832,6 +1044,18 @@ export function Inventory() {
         );
         if (unitsErr) throw unitsErr;
       }
+
+      // Best-effort — the admin bell should reflect this, but a failed
+      // notification insert must never fail the product add itself.
+      const actorName = session.user.email?.split("@")[0] ?? "Admin";
+      await supabase.from("notifications").insert({
+        for_admin: true,
+        type: "product_added",
+        title: "New Product Added",
+        body: `${form.name.trim()} added by ${actorName}.`,
+        related_id: inserted.id,
+        link: "/inventory",
+      });
 
       setForm(emptyForm);
       setShowAddForm(false);
@@ -1003,7 +1227,7 @@ export function Inventory() {
       <h1>Inventory Report${groupByCategory ? " — Category-wise" : ""}</h1>
       <p>Category: ${category} · Brand: ${brandFilter === "All" ? "All" : brandName(brandFilter)} · Sorted by: ${SORT_OPTIONS.find((s) => s.key === sortKey)?.label}</p>
       <table>
-        <thead><tr><th>Product</th><th>Category</th><th>Brand</th><th style="text-align:right">Price</th><th style="text-align:right">Stock</th><th style="text-align:right">Value</th></tr></thead>
+        <thead><tr><th>Product</th><th>Category</th><th>Brand</th><th style="text-align:right">Sale Price</th><th style="text-align:right">Stock</th><th style="text-align:right">Value</th></tr></thead>
         <tbody>${bodyHtml}</tbody>
         <tfoot><tr><td colspan="5">Total Stock Value</td><td style="text-align:right">${formatCurrency(totalValue)}</td></tr></tfoot>
       </table>
@@ -1024,9 +1248,9 @@ export function Inventory() {
               Category: p.category,
               Brand: brandName(p.brand_id),
               Type: p.product_type,
-              Price: p.price,
+              "Sale Price": p.price,
               "Original Price": p.original_price,
-              "Cost Price": p.cost_price,
+              "Wholesale Price": p.cost_price,
               Stock: p.stock,
               "Stock Value": p.price * p.stock,
               Active: p.is_active ? "Yes" : "No",
@@ -1108,7 +1332,7 @@ export function Inventory() {
               <th>Category</th>
               <th>Brand</th>
               <th>Type</th>
-              <th className="text-right">Price</th>
+              <th className="text-right">Sale Price</th>
               <th className="text-right">Stock</th>
               <th className="text-right">Actions</th>
             </tr>
@@ -1247,6 +1471,24 @@ export function Inventory() {
               <div className="mb-3 flex items-start gap-2 rounded-md bg-red-50 p-3 text-xs text-brand-danger border border-red-200">
                 <AlertCircle size={15} className="shrink-0 mt-0.5" />
                 <span>{error}</span>
+              </div>
+            )}
+
+            {!editingItem && (
+              <div className="mb-3 rounded-md border border-dashed border-gray-300 p-2.5">
+                {!invoiceScanActive ? (
+                  <button type="button" className="btn-secondary w-full text-xs" onClick={startInvoiceScanner}>
+                    <Camera size={13} /> Scan Invoice / Product QR to Auto-Fill
+                  </button>
+                ) : (
+                  <>
+                    <div id="invoice-scanner-region" className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
+                    <button type="button" className="btn-ghost mt-2 w-full text-xs" onClick={stopInvoiceScanner}>
+                      Stop Camera
+                    </button>
+                  </>
+                )}
+                {invoiceScanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{invoiceScanFeedback}</p>}
               </div>
             )}
 
@@ -1436,8 +1678,8 @@ export function Inventory() {
                     (editingItem
                       ? specsArray(editingItem.specs, "ram").length > 0 && specsArray(editingItem.specs, "storage").length > 0
                       : form.ram.length > 0 && form.storage.length > 0)
-                      ? "Price (₹) — auto-set to the lowest RAM+Storage price above"
-                      : "Price (₹) *"
+                      ? "Sale Price (₹) — auto-set to the lowest RAM+Storage price above"
+                      : "Sale Price (₹) *"
                   }
                 >
                   <input
@@ -1474,7 +1716,7 @@ export function Inventory() {
                 </Field>
               </div>
 
-              <Field label="Cost Price (₹) — used to compute Gross Profit on the Dashboard, leave blank if unknown">
+              <Field label="Wholesale Price (₹) — what you paid the supplier; used to compute Gross Profit on the Dashboard, leave blank if unknown">
                 <input
                   type="number"
                   className="input w-full"

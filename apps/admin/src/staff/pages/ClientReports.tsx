@@ -42,7 +42,13 @@ export function ClientReports() {
   const [resubmitId, setResubmitId] = useState<string | null>(null);
 
   useEffect(() => {
-    supabase.from("customers").select("id, name, phone").order("name").then(({ data }) => setCustomers((data as Customer[]) ?? []));
+    // customers are no longer readable by the anonymous role; the session-token
+    // function returns the clients this staff member may see.
+    if (token) {
+      supabase
+        .rpc("staff_get_clients", { p_token: token, p_search: null })
+        .then(({ data }) => setCustomers(((data as Customer[]) ?? []).map((c) => ({ id: c.id, name: c.name, phone: c.phone })).sort((a, b) => a.name.localeCompare(b.name))));
+    }
     loadReports();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);

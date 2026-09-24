@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import { Check, X, Plus } from "lucide-react";
+import { Check, X, Plus, PartyPopper } from "lucide-react";
 
 interface Staff {
   id: string;
   name: string;
   phone: string | null;
+  date_of_birth: string | null;
 }
 
 interface AttendanceRow {
@@ -13,6 +15,8 @@ interface AttendanceRow {
   staff_id: string;
   clock_in: string;
   clock_out: string | null;
+  clock_in_lat: number | null;
+  clock_in_lng: number | null;
 }
 
 interface LeaveRow {
@@ -39,13 +43,17 @@ const TABS = ["Attendance", "Leave", "Tasks"] as const;
 type Tab = (typeof TABS)[number];
 
 export function StaffPortal() {
-  const [tab, setTab] = useState<Tab>("Attendance");
+  const [searchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const initialTab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "Attendance";
+  const [tab, setTab] = useState<Tab>(initialTab);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [attendance, setAttendance] = useState<AttendanceRow[]>([]);
   const [leave, setLeave] = useState<LeaveRow[]>([]);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [showTaskForm, setShowTaskForm] = useState(false);
   const [taskForm, setTaskForm] = useState({ staff_id: "", title: "", description: "", due_date: "" });
+  const [wishedIds, setWishedIds] = useState<string[]>([]);
 
   useEffect(() => {
     load();
@@ -67,7 +75,7 @@ export function StaffPortal() {
 
   async function load() {
     const [{ data: s }, { data: a }, { data: l }, { data: t }] = await Promise.all([
-      supabase.from("staff").select("id, name, phone").order("name"),
+      supabase.from("staff").select("id, name, phone, date_of_birth").order("name"),
       supabase.from("attendance").select("*").order("clock_in", { ascending: false }).limit(100),
       supabase.from("leave_requests").select("*").order("created_at", { ascending: false }),
       supabase.from("staff_tasks").select("*").order("created_at", { ascending: false }),
@@ -80,6 +88,23 @@ export function StaffPortal() {
 
   function staffName(id: string) {
     return staff.find((s) => s.id === id)?.name ?? "Unknown";
+  }
+
+  const todaysBirthdays = staff.filter((s) => {
+    if (!s.date_of_birth) return false;
+    const dob = new Date(s.date_of_birth);
+    const now = new Date();
+    return dob.getMonth() === now.getMonth() && dob.getDate() === now.getDate();
+  });
+
+  async function wishBirthday(s: Staff) {
+    await supabase.from("notifications").insert({
+      staff_id: s.id,
+      type: "birthday_wish",
+      title: "Happy Birthday! 🎂",
+      body: "Admin wished you a happy birthday!",
+    });
+    setWishedIds((prev) => [...prev, s.id]);
   }
 
   async function reviewLeave(id: string, status: "approved" | "rejected") {
@@ -107,6 +132,29 @@ export function StaffPortal() {
     <div className="space-y-4">
       <h1 className="text-lg font-semibold text-gray-800">Staff Portal Oversight</h1>
 
+      {todaysBirthdays.length > 0 && (
+        <div className="card flex flex-wrap items-center justify-between gap-2 border-gold/40 bg-gold/5 p-3">
+          <div className="flex items-center gap-2 text-sm">
+            <PartyPopper size={16} className="text-gold" />
+            <span className="font-medium text-gray-700">
+              Today's Birthday: {todaysBirthdays.map((s) => s.name).join(", ")}
+            </span>
+          </div>
+          <div className="flex gap-1.5">
+            {todaysBirthdays.map((s) => (
+              <button
+                key={s.id}
+                disabled={wishedIds.includes(s.id)}
+                onClick={() => wishBirthday(s)}
+                className="rounded-lg bg-gold/15 px-2.5 py-1 text-xs font-semibold text-goldDim disabled:opacity-50"
+              >
+                {wishedIds.includes(s.id) ? "Wished ✓" : `Wish ${s.name.split(" ")[0]}`}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex gap-1 rounded-md bg-gray-100 p-1 w-fit">
         {TABS.map((t) => (
           <button
@@ -127,21 +175,44 @@ export function StaffPortal() {
             <thead>
               <tr>
                 <th>Staff</th>
+                <th>Date</th>
                 <th>Clock In</th>
                 <th>Clock Out</th>
+                <th>Location</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {attendance.map((a) => (
                 <tr key={a.id}>
                   <td className="font-medium">{staffName(a.staff_id)}</td>
-                  <td>{new Date(a.clock_in).toLocaleString("en-IN")}</td>
-                  <td>{a.clock_out ? new Date(a.clock_out).toLocaleString("en-IN") : "—"}</td>
+                  <td>{new Date(a.clock_in).toLocaleDateString("en-IN")}</td>
+                  <td>{new Date(a.clock_in).toLocaleTimeString("en-IN")}</td>
+                  <td>{a.clock_out ? new Date(a.clock_out).toLocaleTimeString("en-IN") : "—"}</td>
+                  <td>
+                    {a.clock_in_lat != null && a.clock_in_lng != null ? (
+                      <a
+                        className="text-brand-primary underline"
+                        href={`https://www.google.com/maps?q=${a.clock_in_lat},${a.clock_in_lng}`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        View on map
+                      </a>
+                    ) : (
+                      <span className="text-gray-400">Not captured</span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={a.clock_out ? "pill-info" : "pill-success"}>
+                      {a.clock_out ? "Checked out" : "Present"}
+                    </span>
+                  </td>
                 </tr>
               ))}
               {attendance.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="py-8 text-center text-gray-400">No attendance records yet.</td>
+                  <td colSpan={6} className="py-8 text-center text-gray-400">No attendance records yet.</td>
                 </tr>
               )}
             </tbody>

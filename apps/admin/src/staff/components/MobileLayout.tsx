@@ -5,7 +5,7 @@ import { useStaffAuth } from "../context/StaffAuthContext";
 import { SmoothScroll } from "../../components/SmoothScroll";
 
 export function MobileLayout() {
-  const { staff, signOut } = useStaffAuth();
+  const { staff, signOut, unreadNotifications } = useStaffAuth();
   const mainRef = useRef<HTMLElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
   const firstName = staff?.name?.split(" ")[0] ?? "";
@@ -61,12 +61,19 @@ export function MobileLayout() {
               to={to}
               end={end}
               className={({ isActive }) =>
-                `flex flex-1 flex-col items-center justify-center gap-0.5 text-xs transition-colors ${
+                `relative flex flex-1 flex-col items-center justify-center gap-0.5 text-xs transition-colors ${
                   isActive ? "text-gold" : "text-gray-400 hover:text-gray-600"
                 }`
               }
             >
-              <Icon size={20} />
+              <span className="relative">
+                <Icon size={20} />
+                {label === "Alerts" && unreadNotifications > 0 && (
+                  <span className="absolute -right-1.5 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-brand-danger px-0.5 text-[9px] font-semibold text-white">
+                    {unreadNotifications > 9 ? "9+" : unreadNotifications}
+                  </span>
+                )}
+              </span>
               {label}
             </NavLink>
           ))}

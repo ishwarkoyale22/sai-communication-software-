@@ -1,7 +1,8 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useStaffAuth } from "../staff/context/StaffAuthContext";
+import { useStaffAuth, portalPathForRole } from "../staff/context/StaffAuthContext";
+import { supabase } from "../lib/supabase";
 import { AlertCircle, CheckCircle } from "lucide-react";
 
 export function Login() {
@@ -18,6 +19,19 @@ export function Login() {
   const [phone, setPhone] = useState("");
   const [pin, setPin] = useState("");
 
+  // Staff — Create New Account
+  const [showRegister, setShowRegister] = useState(false);
+  const [regName, setRegName] = useState("");
+  const [regPhone, setRegPhone] = useState("");
+  const [regEmail, setRegEmail] = useState("");
+  const [regPassword, setRegPassword] = useState("");
+  const [regDob, setRegDob] = useState("");
+  const [regRole, setRegRole] = useState<"technician" | "sales" | "receptionist">("sales");
+  // The role picked here must match the account's stored role, otherwise
+  // login is rejected with an error (legacy staff/cashier/manager accounts
+  // are exempt and keep the generic portal).
+  const [loginRoleTab, setLoginRoleTab] = useState<"technician" | "sales" | "receptionist">("sales");
+
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -30,7 +44,7 @@ export function Login() {
     if (session) {
       navigate("/", { replace: true });
     } else if (staff) {
-      navigate("/portal", { replace: true });
+      navigate(portalPathForRole(staff.role), { replace: true });
     }
   }, [session, staff, navigate]);
 
@@ -67,15 +81,61 @@ export function Login() {
       // staff_sessions token and clocks the staff member in) — not a
       // client-fabricated "session" written straight to localStorage,
       // which is what this used to do before Admin and Staff shared an app.
-      const res = await loginWithPin(cleanPhone, pin);
+      const res = await loginWithPin(cleanPhone, pin, loginRoleTab);
       if (res.error) {
         setError(res.error);
         return;
       }
       setSuccess("Signed in! Redirecting to Staff Portal...");
-      navigate("/portal", { replace: true });
+      navigate(portalPathForRole(res.staff?.role), { replace: true });
     } catch (err: any) {
       setError(err?.message || "Failed to sign in. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRegisterSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(null);
+
+    if (!regName.trim() || !regPhone.trim()) {
+      setError("Full name and mobile number are required.");
+      return;
+    }
+    if (!/^\d{4}$/.test(regPassword)) {
+      setError("Password must be a 4-digit PIN — this is what you'll log in with.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // Goes through the same admin approval flow StaffManagement.tsx
+      // already uses (is_active) — the new account can't log in until
+      // an admin activates it.
+      const { data, error: rpcErr } = await supabase.rpc("staff_register", {
+        p_name: regName.trim(),
+        p_phone: regPhone.trim(),
+        p_email: regEmail.trim() || null,
+        p_pin: regPassword,
+        p_date_of_birth: regDob || null,
+        p_role: regRole,
+      });
+      if (rpcErr || !data?.success) {
+        setError(rpcErr?.message || data?.error || "Failed to create account.");
+        return;
+      }
+      setSuccess("Account created! An admin needs to approve it before you can log in.");
+      setShowRegister(false);
+      setRegName("");
+      setRegPhone("");
+      setRegEmail("");
+      setRegPassword("");
+      setRegDob("");
+      setRegRole("sales");
+    } catch (err: any) {
+      setError(err?.message || "Failed to create account.");
     } finally {
       setLoading(false);
     }
@@ -198,8 +258,126 @@ export function Login() {
                 {loading ? "Signing in..." : "Sign in"}
               </button>
             </form>
+          ) : showRegister ? (
+            <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-600">Role</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { value: "technician", label: "Technician" },
+                      { value: "sales", label: "Sales Person" },
+                      { value: "receptionist", label: "Receptionist" },
+                    ] as const
+                  ).map((r) => (
+                    <button
+                      type="button"
+                      key={r.value}
+                      onClick={() => setRegRole(r.value)}
+                      className={`rounded-lg border py-2 text-xs font-medium transition-colors ${
+                        regRole === r.value
+                          ? "border-brand-primary bg-brand-primary/10 text-brand-primary"
+                          : "border-border text-gray-500 hover:border-gold"
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-600">Full Name</label>
+                <input
+                  required
+                  value={regName}
+                  onChange={(e) => setRegName(e.target.value)}
+                  className="input-glossy"
+                  placeholder="Your full name"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-600">Mobile Number</label>
+                <input
+                  type="tel"
+                  required
+                  value={regPhone}
+                  onChange={(e) => setRegPhone(e.target.value)}
+                  className="input-glossy font-mono"
+                  placeholder="10-digit number"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-600">Email</label>
+                <input
+                  type="email"
+                  value={regEmail}
+                  onChange={(e) => setRegEmail(e.target.value)}
+                  className="input-glossy"
+                  placeholder="you@example.com (optional)"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-600">Password (4-digit PIN — this is how you'll log in)</label>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={4}
+                  required
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                  className="input-glossy text-center font-mono tracking-[0.5em]"
+                  placeholder="••••"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-gray-600">Date of Birth</label>
+                <input
+                  type="date"
+                  value={regDob}
+                  onChange={(e) => setRegDob(e.target.value)}
+                  className="input-glossy"
+                />
+              </div>
+
+              <button type="submit" disabled={loading} className="btn-glossy mt-2">
+                {loading && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />}
+                {loading ? "Creating account..." : "Create Account"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRegister(false);
+                  setError(null);
+                }}
+                className="w-full text-center text-xs text-gray-500 transition-colors hover:text-brand-primary"
+              >
+                Back to login
+              </button>
+            </form>
           ) : (
             <form onSubmit={handleStaffSubmit} className="space-y-3.5">
+              <div className="grid grid-cols-3 gap-1.5">
+                {(
+                  [
+                    { value: "technician", label: "Technician" },
+                    { value: "sales", label: "Sales Person" },
+                    { value: "receptionist", label: "Receptionist" },
+                  ] as const
+                ).map((r) => (
+                  <button
+                    type="button"
+                    key={r.value}
+                    onClick={() => setLoginRoleTab(r.value)}
+                    className={`rounded-lg border py-2 text-xs font-medium transition-colors ${
+                      loginRoleTab === r.value
+                        ? "border-brand-primary bg-brand-primary/10 text-brand-primary"
+                        : "border-border text-gray-500 hover:border-gold"
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
+              </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-gray-600">Phone Number</label>
                 <input
@@ -229,6 +407,17 @@ export function Login() {
               <button type="submit" disabled={loading} className="btn-glossy mt-2">
                 {loading && <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/30 border-t-white" />}
                 {loading ? "Signing in..." : "Clock In / Sign in"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRegister(true);
+                  setError(null);
+                  setSuccess(null);
+                }}
+                className="w-full text-center text-xs text-gray-500 transition-colors hover:text-brand-primary"
+              >
+                New here? Create Account
               </button>
             </form>
           )}

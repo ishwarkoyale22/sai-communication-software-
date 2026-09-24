@@ -1,28 +1,47 @@
 import { useEffect, useState } from "react";
-import { Bell, CheckCircle2, XCircle, AlertCircle, CalendarClock, Megaphone, ListChecks } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Bell, CheckCircle2, XCircle, AlertCircle, CalendarClock, Megaphone, ListChecks, PartyPopper, UserCheck } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
 
+type NotificationType =
+  | "task_assigned"
+  | "report_approved"
+  | "report_rejected"
+  | "changes_required"
+  | "follow_up_reminder"
+  | "announcement"
+  | "birthday_wish"
+  | "leave_approved"
+  | "leave_rejected"
+  | "account_approved";
+
 interface Notification {
   id: string;
-  type: "task_assigned" | "report_approved" | "report_rejected" | "changes_required" | "follow_up_reminder" | "announcement";
+  type: NotificationType;
   title: string;
   body: string | null;
+  link: string | null;
   is_read: boolean;
   created_at: string;
 }
 
-const ICON: Record<Notification["type"], typeof Bell> = {
+const ICON: Record<NotificationType, typeof Bell> = {
   task_assigned: ListChecks,
   report_approved: CheckCircle2,
   report_rejected: XCircle,
   changes_required: AlertCircle,
   follow_up_reminder: CalendarClock,
   announcement: Megaphone,
+  birthday_wish: PartyPopper,
+  leave_approved: CheckCircle2,
+  leave_rejected: XCircle,
+  account_approved: UserCheck,
 };
 
 export function Notifications() {
-  const { token } = useStaffAuth();
+  const { token, refreshNotifications } = useStaffAuth();
+  const navigate = useNavigate();
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -38,10 +57,13 @@ export function Notifications() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  async function markRead(id: string) {
-    if (!token) return;
-    setItems((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
-    await supabase.rpc("staff_mark_notification_read", { p_token: token, p_notification_id: id });
+  async function openNotification(n: Notification) {
+    if (!n.is_read) {
+      setItems((prev) => prev.map((i) => (i.id === n.id ? { ...i, is_read: true } : i)));
+      await supabase.rpc("staff_mark_notification_read", { p_token: token, p_notification_id: n.id });
+      await refreshNotifications();
+    }
+    if (n.link) navigate(n.link);
   }
 
   if (loading) return <div className="text-center text-sm text-gray-400">Loading…</div>;
@@ -53,11 +75,11 @@ export function Notifications() {
   return (
     <div className="space-y-2">
       {items.map((n) => {
-        const Icon = ICON[n.type];
+        const Icon = ICON[n.type] ?? Bell;
         return (
           <button
             key={n.id}
-            onClick={() => !n.is_read && markRead(n.id)}
+            onClick={() => openNotification(n)}
             className={`card flex w-full items-start gap-3 p-3 text-left ${!n.is_read ? "border-l-2 border-brand-primary" : ""}`}
           >
             <div className="mt-0.5 shrink-0 text-brand-primary">

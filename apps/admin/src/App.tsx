@@ -48,6 +48,8 @@ const Brands = lazy(() => import("./pages/Brands").then((m) => ({ default: m.Bra
 const ServiceManagement = lazy(() => import("./pages/ServiceManagement").then((m) => ({ default: m.ServiceManagement })));
 const WebOrders = lazy(() => import("./pages/WebOrders").then((m) => ({ default: m.WebOrders })));
 const BackupRestore = lazy(() => import("./pages/BackupRestore").then((m) => ({ default: m.BackupRestore })));
+const Gifts = lazy(() => import("./pages/Gifts").then((m) => ({ default: m.Gifts })));
+const FinanceReports = lazy(() => import("./pages/FinanceReports").then((m) => ({ default: m.FinanceReports })));
 
 // Staff Portal (role = staff). Its own mobile-first layout, own auth
 // (session token, not Supabase Auth), completely separate route subtree —
@@ -65,6 +67,17 @@ const StaffReviews = lazy(() => import("./staff/pages/Reviews").then((m) => ({ d
 const StaffActivity = lazy(() => import("./staff/pages/Activity").then((m) => ({ default: m.ActivityPage })));
 const StaffNotifications = lazy(() => import("./staff/pages/Notifications").then((m) => ({ default: m.Notifications })));
 const StaffProfile = lazy(() => import("./staff/pages/Profile").then((m) => ({ default: m.Profile })));
+const StaffFinanceReports = lazy(() => import("./staff/pages/FinanceReports").then((m) => ({ default: m.FinanceReports })));
+// Role-portal additions (Sales / Receptionist) — Technician reuses StaffRepairs/StaffTasks/etc above.
+const StaffNewSale = lazy(() => import("./staff/pages/NewSale").then((m) => ({ default: m.NewSale })));
+const StaffProducts = lazy(() => import("./staff/pages/ProductsView").then((m) => ({ default: m.ProductsView })));
+const StaffOffers = lazy(() => import("./staff/pages/OffersView").then((m) => ({ default: m.OffersView })));
+const StaffGiftsCatalog = lazy(() => import("./staff/pages/GiftsCatalog").then((m) => ({ default: m.GiftsCatalog })));
+const StaffOrders = lazy(() => import("./staff/pages/OrdersView").then((m) => ({ default: m.OrdersView })));
+const StaffSalesHistory = lazy(() => import("./staff/pages/SalesHistory").then((m) => ({ default: m.SalesHistory })));
+const StaffSalesTargets = lazy(() => import("./staff/pages/SalesTargets").then((m) => ({ default: m.SalesTargets })));
+const StaffEnquiries = lazy(() => import("./staff/pages/Enquiries").then((m) => ({ default: m.Enquiries })));
+const StaffRepairIntake = lazy(() => import("./staff/pages/RepairIntake").then((m) => ({ default: m.RepairIntake })));
 
 function RouteFallback() {
   return (
@@ -94,6 +107,18 @@ function RequireStaffPortal({ children }: { children: React.ReactNode }) {
   const { staff, token, loading } = useStaffAuth();
   if (loading) return <div className="flex h-screen items-center justify-center text-gray-400">Loading…</div>;
   if (!staff || !token) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
+
+// A Technician must not reach Sales-only screens (and vice versa) even by
+// typing the URL directly — the Home page only ever links to same-role
+// pages, this is the backstop. Legacy roles (staff/cashier/manager) never
+// match any of the 3 new role-gated route groups, so they simply bounce
+// back to the generic /portal, same as always.
+function RequireStaffRole({ role, children }: { role: "technician" | "sales" | "receptionist" | ("technician" | "sales" | "receptionist")[]; children: React.ReactNode }) {
+  const { staff } = useStaffAuth();
+  const allowed = Array.isArray(role) ? role : [role];
+  if (!staff || !allowed.includes(staff.role as any)) return <Navigate to="/portal" replace />;
   return <>{children}</>;
 }
 
@@ -127,10 +152,12 @@ export default function App() {
                 <Route path="/birthdays" element={<Birthdays />} />
                 <Route path="/enquiries" element={<Enquiries />} />
                 <Route path="/client-reports" element={<ClientReports />} />
+                <Route path="/finance-reports" element={<FinanceReports />} />
                 <Route path="/reviews" element={<Reviews />} />
                 <Route path="/repair-enquiries" element={<RepairEnquiries />} />
                 <Route path="/repairs" element={<Repairs />} />
                 <Route path="/gift-hampers" element={<GiftHampers />} />
+                <Route path="/gifts" element={<Gifts />} />
                 <Route path="/brands" element={<Brands />} />
                 <Route path="/services" element={<ServiceManagement />} />
                 <Route path="/wholesaler-invoices" element={<WholesalerInvoices />} />
@@ -161,6 +188,9 @@ export default function App() {
                 }
               >
                 <Route path="/portal" element={<StaffHome />} />
+                <Route path="/portal/technician" element={<StaffHome />} />
+                <Route path="/portal/sales" element={<StaffHome />} />
+                <Route path="/portal/reception" element={<StaffHome />} />
                 <Route path="/portal/attendance" element={<StaffAttendance />} />
                 <Route path="/portal/leave" element={<StaffLeave />} />
                 <Route path="/portal/tasks" element={<StaffTasks />} />
@@ -168,10 +198,26 @@ export default function App() {
                 <Route path="/portal/clients" element={<StaffClients />} />
                 <Route path="/portal/follow-ups" element={<StaffFollowUps />} />
                 <Route path="/portal/reports" element={<StaffClientReports />} />
+                <Route path="/portal/finance-reports" element={<StaffFinanceReports />} />
                 <Route path="/portal/reviews" element={<StaffReviews />} />
                 <Route path="/portal/activity" element={<StaffActivity />} />
                 <Route path="/portal/notifications" element={<StaffNotifications />} />
                 <Route path="/portal/profile" element={<StaffProfile />} />
+
+                {/* Sales Person */}
+                <Route path="/portal/new-sale" element={<RequireStaffRole role="sales"><StaffNewSale /></RequireStaffRole>} />
+                <Route path="/portal/products" element={<RequireStaffRole role="sales"><StaffProducts /></RequireStaffRole>} />
+                <Route path="/portal/offers" element={<RequireStaffRole role="sales"><StaffOffers /></RequireStaffRole>} />
+                <Route path="/portal/gifts-catalog" element={<RequireStaffRole role="sales"><StaffGiftsCatalog /></RequireStaffRole>} />
+                <Route path="/portal/orders" element={<RequireStaffRole role="sales"><StaffOrders /></RequireStaffRole>} />
+                <Route path="/portal/sales-history" element={<RequireStaffRole role="sales"><StaffSalesHistory /></RequireStaffRole>} />
+                <Route path="/portal/targets" element={<RequireStaffRole role="sales"><StaffSalesTargets /></RequireStaffRole>} />
+
+                {/* Sales + Receptionist share Customer Enquiries */}
+                <Route path="/portal/enquiries" element={<RequireStaffRole role={["sales", "receptionist"]}><StaffEnquiries /></RequireStaffRole>} />
+
+                {/* Receptionist */}
+                <Route path="/portal/repair-intake" element={<RequireStaffRole role="receptionist"><StaffRepairIntake /></RequireStaffRole>} />
               </Route>
 
               {/* Unknown URL under either subtree — including a staff member
