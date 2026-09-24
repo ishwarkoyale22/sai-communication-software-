@@ -39,6 +39,7 @@ interface InventoryRow {
 interface FinanceRow {
   id: string;
   finance_amount: number;
+  sale_id?: string | null;
   finance_date: string;
 }
 interface RepairRow {
@@ -166,7 +167,7 @@ export function Dashboard() {
       supabase.from("sales").select("id, final_amount, payment_method, staff_id, created_at").gte("created_at", yearAgo.toISOString()),
       supabase.from("sales_items").select("sale_id, inventory_id, item_name, quantity, total_price"),
       supabase.from("inventory").select("id, name, category, price, cost_price, stock, created_at").eq("is_active", true),
-      supabase.from("finance_transactions").select("id, finance_amount, finance_date").gte("finance_date", yearAgo.toISOString().slice(0, 10)),
+      supabase.from("finance_transactions").select("id, finance_amount, finance_date, sale_id").gte("finance_date", yearAgo.toISOString().slice(0, 10)),
       supabase.from("repair_enquiries").select("id", { count: "exact", head: true }).eq("status", "pending"),
       supabase.from("website_orders").select("id", { count: "exact", head: true }).eq("order_status", "pending"),
       supabase.from("website_orders").select("id, order_number, customer_name, total_amount, order_status, created_at").order("created_at", { ascending: false }).limit(5),
@@ -238,10 +239,12 @@ export function Dashboard() {
   // sorts before "2026-09-17T00:00:00.000Z" lexicographically).
   const periodFinanceTotal = useMemo(() => {
     const start = periodStart(period).toISOString().slice(0, 10);
+    // An EMI sale is already counted through its sale row — only fold in finance records that aren't.
+    const emiSaleIds = new Set(sales.filter((s) => s.payment_method === "emi").map((s) => s.id));
     return financeTransactions
-      .filter((f) => f.finance_date >= start)
+      .filter((f) => f.finance_date >= start && !(f.sale_id && emiSaleIds.has(f.sale_id)))
       .reduce((sum, f) => sum + Number(f.finance_amount ?? 0), 0);
-  }, [financeTransactions, period]);
+  }, [financeTransactions, period, sales]);
 
   const paymentSplit = useMemo(
     () => computePaymentSplit(periodSales.map((s) => ({ amount: s.final_amount, paymentMethod: s.payment_method })), periodFinanceTotal),

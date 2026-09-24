@@ -40,10 +40,14 @@ export function Payments() {
   async function load() {
     const [{ data: sales }, { data: orders }, { data: emi }] = await Promise.all([
       supabase.from("sales").select("id, invoice_number, customer_name, final_amount, payment_method, created_at"),
-      supabase.from("website_orders").select("id, order_number, customer_name, total_amount, payment_method, created_at"),
-      supabase.from("finance_transactions").select("id, product_name, customer_name, finance_amount, finance_date"),
+      supabase.from("website_orders").select("id, order_number, customer_name, total_amount, payment_method, created_at, sale_id, order_status"),
+      supabase.from("finance_transactions").select("id, product_name, customer_name, finance_amount, finance_date, sale_id"),
     ]);
 
+    // A delivered website order becomes a sale (WEB-…), and an EMI sale also has a finance
+    // record — count each payment once: skip cancelled orders, orders that already have a sale, and finance
+    // records whose sale is already counted as an EMI sale.
+    const emiSaleIds = new Set(((sales ?? []) as any[]).filter((s) => s.payment_method === "emi").map((s) => s.id));
     const combined: PaymentRow[] = [
       ...((sales ?? []) as any[]).map((s) => ({
         id: `sale-${s.id}`,
@@ -54,7 +58,7 @@ export function Payments() {
         paymentMethod: s.payment_method ?? "",
         createdAt: s.created_at,
       })),
-      ...((orders ?? []) as any[]).map((o) => ({
+      ...((orders ?? []) as any[]).filter((o) => !o.sale_id && o.order_status !== "cancelled").map((o) => ({
         id: `order-${o.id}`,
         source: "Website Order" as const,
         reference: o.order_number,
@@ -63,7 +67,7 @@ export function Payments() {
         paymentMethod: o.payment_method ?? "",
         createdAt: o.created_at,
       })),
-      ...((emi ?? []) as any[]).map((e) => ({
+      ...((emi ?? []) as any[]).filter((e) => !(e.sale_id && emiSaleIds.has(e.sale_id))).map((e) => ({
         id: `finance-${e.id}`,
         source: "Finance/EMI" as const,
         reference: e.product_name,
