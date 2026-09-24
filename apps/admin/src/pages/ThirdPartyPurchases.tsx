@@ -1,12 +1,25 @@
 import { useEffect, useState } from "react";
-import { formatCurrency, formatDate, openPurchaseBill } from "@sai/shared";
+import { formatCurrency, formatDate, lineAmounts, openPurchaseBill, paymentModeLabel } from "@sai/shared";
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
+import { PurchaseEntryModal, type PurchaseEntry } from "../components/PurchaseEntryModal";
+import { billFromEntry } from "../lib/purchaseBill";
+import { StatusPill } from "../components/StatusPill";
 import { Plus, Printer, Eye } from "lucide-react";
 
 interface ThirdPartyPurchase {
   id: string;
   vendor_name: string;
+  vendor_phone: string | null;
+  vendor_gstin: string | null;
+  vendor_address: string | null;
+  vendor_state: string | null;
+  place_of_supply: string | null;
+  bill_number: string | null;
+  payment_mode: string | null;
+  paid_amount: number | null;
+  items: unknown;
+  terms: string | null;
   item_name: string;
   quantity: number;
   unit_price: number;
@@ -15,12 +28,11 @@ interface ThirdPartyPurchase {
   notes: string | null;
 }
 
-const empty = { vendor_name: "", item_name: "", quantity: 1, unit_price: 0, purchase_date: new Date().toISOString().slice(0, 10), notes: "" };
-
 export function ThirdPartyPurchases() {
   const [rows, setRows] = useState<ThirdPartyPurchase[]>([]);
-  const [form, setForm] = useState(empty);
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -38,30 +50,71 @@ export function ThirdPartyPurchases() {
     setRows((data as ThirdPartyPurchase[]) ?? []);
   }
 
-  async function add() {
-    if (!form.vendor_name || !form.item_name) return;
-    await supabase.from("third_party_purchases").insert({
-      vendor_name: form.vendor_name,
-      item_name: form.item_name,
-      quantity: form.quantity,
-      unit_price: form.unit_price,
-      total_price: form.quantity * form.unit_price,
-      purchase_date: form.purchase_date,
-      notes: form.notes || null,
+  async function add(e: PurchaseEntry) {
+    setSaving(true);
+    setError(null);
+    const first = e.lines[0];
+    const { error: insertErr } = await supabase.from("third_party_purchases").insert({
+      vendor_name: e.partyName,
+      vendor_phone: e.phone || null,
+      vendor_gstin: e.gstin || null,
+      vendor_address: e.address || null,
+      vendor_state: e.partyState || null,
+      place_of_supply: e.placeOfSupply || null,
+      bill_number: e.billNumber || null,
+      payment_mode: e.paymentMode,
+      paid_amount: e.paidAmount,
+      terms: e.terms || null,
+      items: e.lines.map((l) => ({
+        name: l.name,
+        hsn_sac: l.hsn_sac || null,
+        serials: l.serials,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        gst_rate: l.gst_rate,
+        total_price: lineAmounts(l).total,
+      })),
+      // Summary columns — keep the list, exports and older code meaningful for multi-item bills.
+      item_name: e.lines.length > 1 ? `${first.name} (+${e.lines.length - 1} more)` : first.name,
+      quantity: e.totals.quantity,
+      unit_price: e.totals.quantity > 0 ? Math.round((e.totals.total / e.totals.quantity) * 100) / 100 : e.totals.total,
+      total_price: e.totals.total,
+      purchase_date: e.billDate,
+      notes: e.notes || null,
     });
-    setForm(empty);
+    setSaving(false);
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
     setShowForm(false);
     load();
   }
 
   function printBill(p: ThirdPartyPurchase, mode: "print" | "view" = "print") {
+    const stored = Array.isArray(p.items) ? (p.items as any[]) : [];
+    const items = stored.length > 0
+      ? stored.map((it) => ({
+          name: it.name ?? "Item",
+          hsnSac: it.hsn_sac ?? null,
+          quantity: it.quantity ?? 1,
+          totalPrice: it.total_price ?? 0,
+          ...(it.unit_price != null && it.gst_rate != null ? { unitPrice: Number(it.unit_price), gstRate: Number(it.gst_rate) } : {}),
+          serials: Array.isArray(it.serials) ? it.serials : [],
+        }))
+      // Older single-item purchases: the stored total is the (GST-inclusive) amount.
+      : [{ name: p.item_name, quantity: p.quantity, totalPrice: p.total_price }];
+
     openPurchaseBill({
-      billNumber: `TPP-${p.id.slice(0, 8).toUpperCase()}`,
+      billNumber: p.bill_number || `TPP-${p.id.slice(0, 8).toUpperCase()}`,
       billDate: p.purchase_date,
       supplierName: p.vendor_name,
-      paymentMode: "cash",
-      paidAmount: p.total_price,
-      items: [{ name: p.item_name, quantity: p.quantity, totalPrice: p.total_price }],
+      supplier: { address: p.vendor_address, gstin: p.vendor_gstin, phone: p.vendor_phone, state: p.vendor_state },
+      placeOfSupply: p.place_of_supply,
+      paymentMode: p.payment_mode || "cash",
+      paidAmount: p.paid_amount ?? p.total_price,
+      terms: p.terms,
+      items,
       totalAmount: p.total_price,
       shop: SHOP,
       mode,
@@ -74,10 +127,26 @@ export function ThirdPartyPurchases() {
         <h1 className="text-lg font-semibold text-gray-800">Third-Party Purchases</h1>
         <div className="flex gap-2">
           <ExportExcelButton
-            rows={rows.map((r) => ({ Vendor: r.vendor_name, Item: r.item_name, Qty: r.quantity, "Unit Price": r.unit_price, Total: r.total_price, Date: r.purchase_date }))}
+            rows={rows.map((r) => ({
+              Vendor: r.vendor_name,
+              GSTIN: r.vendor_gstin ?? "",
+              "Bill #": r.bill_number ?? "",
+              Item: r.item_name,
+              Qty: r.quantity,
+              Total: r.total_price,
+              Paid: r.paid_amount ?? r.total_price,
+              "Payment Mode": r.payment_mode ? paymentModeLabel(r.payment_mode) : "",
+              Date: r.purchase_date,
+            }))}
             fileName="third-party-purchases"
           />
-          <button className="btn-primary" onClick={() => setShowForm(true)}>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setError(null);
+              setShowForm(true);
+            }}
+          >
             <Plus size={14} /> Add Purchase
           </button>
         </div>
@@ -89,36 +158,49 @@ export function ThirdPartyPurchases() {
           <thead>
             <tr>
               <th>Vendor</th>
+              <th>Bill #</th>
               <th>Item</th>
               <th className="text-right">Qty</th>
               <th className="text-right">Total</th>
+              <th className="text-right">Due</th>
+              <th>Mode</th>
               <th>Date</th>
               <th className="text-right">Bill</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td className="font-medium">{r.vendor_name}</td>
-                <td>{r.item_name}</td>
-                <td className="text-right">{r.quantity}</td>
-                <td className="text-right">{formatCurrency(r.total_price)}</td>
-                <td className="text-gray-500">{formatDate(r.purchase_date)}</td>
-                <td className="text-right">
-                  <div className="flex items-center justify-end gap-1">
-                    <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(r, "view")} title="View Bill online">
-                      <Eye size={13} /> View
-                    </button>
-                    <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(r)} title="Print Bill">
-                      <Printer size={13} /> Print
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {rows.map((r) => {
+              const paid = r.paid_amount ?? r.total_price; // older rows were all paid in cash
+              const due = Math.max(0, r.total_price - paid);
+              return (
+                <tr key={r.id}>
+                  <td>
+                    <div className="font-medium">{r.vendor_name}</div>
+                    {r.vendor_gstin && <div className="text-[11px] text-gray-400">{r.vendor_gstin}</div>}
+                  </td>
+                  <td className="text-gray-500">{r.bill_number ?? "-"}</td>
+                  <td>{r.item_name}</td>
+                  <td className="text-right">{r.quantity}</td>
+                  <td className="text-right">{formatCurrency(r.total_price)}</td>
+                  <td className="text-right">{due > 0.005 ? <StatusPill status="pending" label={formatCurrency(due)} /> : "-"}</td>
+                  <td className="text-gray-500">{r.payment_mode ? paymentModeLabel(r.payment_mode) : "Cash"}</td>
+                  <td className="text-gray-500">{formatDate(r.purchase_date)}</td>
+                  <td className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(r, "view")} title="View Bill online">
+                        <Eye size={13} /> View
+                      </button>
+                      <button className="btn-secondary !px-2 !py-1 text-xs" onClick={() => printBill(r)} title="Print Bill">
+                        <Printer size={13} /> Print
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={6} className="py-8 text-center text-gray-400">No purchases logged</td>
+                <td colSpan={9} className="py-8 text-center text-gray-400">No purchases logged</td>
               </tr>
             )}
           </tbody>
@@ -126,23 +208,16 @@ export function ThirdPartyPurchases() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/30">
-          <div className="card w-96 space-y-2.5 p-5">
-            <h2 className="mb-2 text-sm font-semibold text-gray-800">Add Purchase</h2>
-            <input className="input" placeholder="Vendor" value={form.vendor_name} onChange={(e) => setForm({ ...form, vendor_name: e.target.value })} />
-            <input className="input" placeholder="Item name" value={form.item_name} onChange={(e) => setForm({ ...form, item_name: e.target.value })} />
-            <div className="grid grid-cols-2 gap-2">
-              <input type="number" className="input" placeholder="Quantity" value={form.quantity} onChange={(e) => setForm({ ...form, quantity: Number(e.target.value) })} />
-              <input type="number" className="input" placeholder="Unit price" value={form.unit_price} onChange={(e) => setForm({ ...form, unit_price: Number(e.target.value) })} />
-            </div>
-            <input type="date" className="input" value={form.purchase_date} onChange={(e) => setForm({ ...form, purchase_date: e.target.value })} />
-            <textarea className="input" placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-            <div className="flex justify-end gap-2 pt-2">
-              <button className="btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
-              <button className="btn-primary" onClick={add}>Save</button>
-            </div>
-          </div>
-        </div>
+        <PurchaseEntryModal
+          title="Add Purchase"
+          partyLabel="Vendor"
+          shopState={SHOP.state}
+          error={error}
+          saving={saving}
+          onClose={() => setShowForm(false)}
+          onSave={add}
+          onPreview={(e) => openPurchaseBill(billFromEntry(e, "view"))}
+        />
       )}
     </div>
   );

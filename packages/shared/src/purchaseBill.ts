@@ -6,11 +6,26 @@
  * seller — matching the exact layout requested for these two pages.
  */
 
+import { paymentModeLabel, round2, stateCodeOf, stateLabel, taxSummary } from "./purchaseLines";
+
 export interface PurchaseBillItem {
   name: string;
   hsnSac?: string | null;
   quantity: number;
   totalPrice: number; // GST-inclusive line amount
+  /** Price per unit EXCLUDING GST. With `gstRate`, printed exactly as entered; without them the line is treated as 18% GST-inclusive (older records). */
+  unitPrice?: number;
+  gstRate?: number;
+  /** IMEI / serial numbers printed under the item name. */
+  serials?: string[];
+}
+
+export interface PurchaseBillSupplier {
+  address?: string | null;
+  gstin?: string | null;
+  phone?: string | null;
+  /** "27-Maharashtra" or just "27". Used to choose CGST+SGST (same state) vs IGST (other state). */
+  state?: string | null;
 }
 
 export interface PurchaseBillInput {
@@ -18,11 +33,17 @@ export interface PurchaseBillInput {
   billDate: string;
   /** The wholesaler / vendor being paid — printed under "Bill From:". */
   supplierName: string;
+  supplier?: PurchaseBillSupplier;
+  /** e.g. "27-Maharashtra". Defaults to the shop's own state. */
+  placeOfSupply?: string | null;
+  /** Payment mode value ("cash", "upi", "credit" ...) or a ready label. */
   paymentMode: string;
   /** How much of the total has actually been paid — defaults to 0 (nothing paid) when omitted. */
   paidAmount?: number;
   items: PurchaseBillItem[];
   totalAmount: number; // GST-inclusive grand total (pre-rounding)
+  /** Printed under "Terms & Conditions". */
+  terms?: string | null;
   shop: {
     name: string;
     address: string;
@@ -35,7 +56,14 @@ export interface PurchaseBillInput {
   mode?: "print" | "view";
 }
 
-const GST_RATE = 0.18;
+function esc(v: unknown): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 
 function numberToWords(num: number): string {
   const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
@@ -81,67 +109,121 @@ function fmtDate(dateStr: string): string {
 export function openPurchaseBill(input: PurchaseBillInput, targetWindow?: Window | null): void {
   const { shop } = input;
 
-  const itemRows = input.items.map((item, i) => {
-    const taxable = item.totalPrice / (1 + GST_RATE);
+  // Per-line figures. New records carry an ex-GST unit price + GST rate; older ones only a GST-inclusive
+  // total, which is split at 18% exactly as before.
+  const lines = input.items.map((item) => {
+    if (item.unitPrice != null && item.gstRate != null) {
+      const taxable = round2(item.quantity * item.unitPrice);
+      const tax = round2((taxable * item.gstRate) / 100);
+      return { item, rate: item.gstRate, unit: item.unitPrice, taxable, tax, total: round2(taxable + tax) };
+    }
+    const rate = 18;
+    const taxable = item.totalPrice / (1 + rate / 100);
     const tax = item.totalPrice - taxable;
-    const unitPrice = item.quantity > 0 ? taxable / item.quantity : taxable;
+    const unit = item.quantity > 0 ? taxable / item.quantity : taxable;
+    return { item, rate, unit, taxable, tax, total: item.totalPrice };
+  });
+
+  const itemRows = lines.map((l, i) => {
+    const serials = (l.item.serials ?? []).filter(Boolean);
     return `<tr>
           <td class="text-center">${i + 1}</td>
-          <td><div class="font-bold">${item.name}</div></td>
-          <td class="text-center">${item.hsnSac ?? ""}</td>
-          <td class="text-center">${item.quantity}</td>
-          <td class="text-right">₹ ${fmt(unitPrice)}</td>
-          <td class="text-right">₹ ${fmt(tax)} (${Math.round(GST_RATE * 100)}%)</td>
-          <td class="text-right">₹ ${fmt(item.totalPrice)}</td>
+          <td><div class="font-bold">${esc(l.item.name)}</div>${
+            serials.length ? `<div style="font-size:8.5px;color:#475569;margin-top:2px;word-break:break-all;">Serial No.: ${esc(serials.join(", "))}</div>` : ""
+          }</td>
+          <td class="text-center">${esc(l.item.hsnSac ?? "")}</td>
+          <td class="text-center">${l.item.quantity}</td>
+          <td class="text-right">₹ ${fmt(l.unit)}</td>
+          <td class="text-right">₹ ${fmt(l.tax)} (${l.rate}%)</td>
+          <td class="text-right">₹ ${fmt(l.total)}</td>
         </tr>`;
   }).join("");
 
   const totalQty = input.items.reduce((s, i) => s + i.quantity, 0);
-  const rawTotal = input.totalAmount;
+  const rawTotal = round2(lines.reduce((s, l) => s + l.total, 0));
   const roundedTotal = Math.round(rawTotal);
   const roundOff = roundedTotal - rawTotal;
-  const roundOffStr = roundOff < 0
-    ? `- ₹ ${fmt(Math.abs(roundOff))}`
-    : roundOff > 0
-      ? `+ ₹ ${fmt(roundOff)}`
-      : "₹ 0.00";
+  const roundOffStr = Math.abs(roundOff) < 0.005
+    ? "₹ 0.00"
+    : roundOff < 0
+      ? `- ₹ ${fmt(Math.abs(roundOff))}`
+      : `+ ₹ ${fmt(roundOff)}`;
 
   const paid = input.paidAmount ?? 0;
   const balance = roundedTotal - paid;
 
-  const hsnGroups = new Map<string, { taxable: number; tax: number }>();
-  for (const item of input.items) {
-    const key = item.hsnSac?.trim() || "";
-    const taxable = item.totalPrice / (1 + GST_RATE);
-    const tax = item.totalPrice - taxable;
-    const g = hsnGroups.get(key);
-    if (g) { g.taxable += taxable; g.tax += tax; }
-    else hsnGroups.set(key, { taxable, tax });
-  }
-  const taxRows = Array.from(hsnGroups.entries()).map(([hsn, g]) => {
-    const half = g.tax / 2;
-    return `<tr>
-              <td class="col-center">${hsn}</td>
+  // Same state -> CGST + SGST (half each); a supplier in another state -> IGST.
+  const placeOfSupply = input.placeOfSupply || shop.state || "";
+  const supplierState = input.supplier?.state || stateLabel(stateCodeOf(input.supplier?.gstin));
+  const posCode = stateCodeOf(placeOfSupply);
+  const supCode = stateCodeOf(supplierState);
+  const interState = !!supCode && !!posCode && supCode !== posCode;
+
+  const summary = taxSummary(lines.map((l) => ({ hsn: l.item.hsnSac ?? "", rate: l.rate, taxable: l.taxable, tax: l.tax })));
+  const taxRows = summary.rows.map((g) => {
+    if (interState) {
+      return `<tr>
+              <td class="col-center">${esc(g.hsn)}</td>
               <td>${fmt(g.taxable)}</td>
-              <td class="col-center">9</td>
-              <td>${fmt(half)}</td>
-              <td class="col-center">9</td>
-              <td>${fmt(half)}</td>
+              <td class="col-center">${g.rate}</td>
+              <td>${fmt(g.tax)}</td>
+              <td>${fmt(g.tax)}</td>
+            </tr>`;
+    }
+    return `<tr>
+              <td class="col-center">${esc(g.hsn)}</td>
+              <td>${fmt(g.taxable)}</td>
+              <td class="col-center">${g.rate / 2}</td>
+              <td>${fmt(g.cgst)}</td>
+              <td class="col-center">${g.rate / 2}</td>
+              <td>${fmt(g.sgst)}</td>
               <td>${fmt(g.tax)}</td>
             </tr>`;
   }).join("");
+  const totalTax = summary.tax;
+  const totalTaxable = summary.taxable;
+  const taxHeader = interState
+    ? `<tr>
+              <th rowspan="2" style="width: 20%;">HSN/ SAC</th>
+              <th rowspan="2" style="width: 30%;">Taxable<br>amount (₹)</th>
+              <th colspan="2" style="width: 30%;">IGST</th>
+              <th rowspan="2" style="width: 20%;">Total Tax<br>(₹)</th>
+            </tr>
+            <tr>
+              <th style="font-size: 8px;">Rate (%)</th>
+              <th style="font-size: 8px;">Amt (₹)</th>
+            </tr>`
+    : `<tr>
+              <th rowspan="2" style="width: 16%;">HSN/ SAC</th>
+              <th rowspan="2" style="width: 22%;">Taxable<br>amount (₹)</th>
+              <th colspan="2" style="width: 24%;">CGST</th>
+              <th colspan="2" style="width: 24%;">SGST</th>
+              <th rowspan="2" style="width: 14%;">Total Tax<br>(₹)</th>
+            </tr>
+            <tr>
+              <th style="font-size: 8px;">Rate (%)</th>
+              <th style="font-size: 8px;">Amt (₹)</th>
+              <th style="font-size: 8px;">Rate (%)</th>
+              <th style="font-size: 8px;">Amt (₹)</th>
+            </tr>`;
+  const taxTotalRow = interState
+    ? `<tr class="font-bold"><td class="col-center">TOTAL</td><td>${fmt(totalTaxable)}</td><td></td><td>${fmt(totalTax)}</td><td>${fmt(totalTax)}</td></tr>`
+    : `<tr class="font-bold"><td class="col-center">TOTAL</td><td>${fmt(totalTaxable)}</td><td></td><td>${fmt(summary.cgst)}</td><td></td><td>${fmt(summary.sgst)}</td><td>${fmt(totalTax)}</td></tr>`;
 
-  const totalTaxable = rawTotal / (1 + GST_RATE);
-  const totalTax = rawTotal - totalTaxable;
-  const totalHalf = totalTax / 2;
+  const sup = input.supplier ?? {};
+  const billFromHtml = `<div style="font-size:11px;">${esc(input.supplierName)}</div>${
+    sup.address ? `<div style="font-weight:500;margin-top:3px;white-space:pre-line;">${esc(sup.address)}</div>` : ""
+  }${sup.phone ? `<div style="font-weight:500;margin-top:3px;">Phone: ${esc(sup.phone)}</div>` : ""}${
+    sup.gstin ? `<div style="font-weight:500;margin-top:2px;">GSTIN: ${esc(sup.gstin)}</div>` : ""
+  }${supplierState ? `<div style="font-weight:500;margin-top:2px;">State: ${esc(supplierState)}</div>` : ""}`;
 
-  const paymentLabel = input.paymentMode.charAt(0).toUpperCase() + input.paymentMode.slice(1).replace(/_/g, " ");
-
+  const paymentLabel = paymentModeLabel(input.paymentMode);
+  const termsHtml = esc(input.terms?.trim() || "Thanks for doing business with us!").replace(/\n/g, "<br>");
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Bill - ${shop.name}</title>
+<title>Bill - ${esc(shop.name)}</title>
 <style>
   * {
     box-sizing: border-box;
@@ -417,13 +499,13 @@ export function openPurchaseBill(input: PurchaseBillInput, targetWindow?: Window
     <table class="header-table">
       <tr>
         <td class="logo-cell">
-          <img src="${window.location.origin}/logo.png" alt="${shop.name}" />
+          <img src="${window.location.origin}/logo.png" alt="${esc(shop.name)}" />
         </td>
         <td class="company-info">
-          <div class="company-title">${shop.name.toUpperCase()}</div>
-          <div class="company-address">${shop.address}</div>
+          <div class="company-title">${esc(shop.name.toUpperCase())}</div>
+          <div class="company-address">${esc(shop.address)}</div>
           <div class="info-grid">
-            <div>Phone: <strong>${shop.phone}</strong></div>
+            <div>Phone: <strong>${esc(shop.phone)}</strong></div>
             ${shop.email ? `<div>Email: <strong>${shop.email.toUpperCase()}</strong></div>` : "<div></div>"}
             ${shop.gstNumber ? `<div>GSTIN: <strong>${shop.gstNumber}</strong></div>` : "<div></div>"}
             <div>State: <strong>${shop.state ?? ""}</strong></div>
@@ -437,11 +519,11 @@ export function openPurchaseBill(input: PurchaseBillInput, targetWindow?: Window
       <div>Bill Details:</div>
     </div>
     <div class="meta-content">
-      <div class="meta-content-left">${input.supplierName}</div>
+      <div class="meta-content-left">${billFromHtml}</div>
       <div class="meta-content-right">
-        <div>Bill No.: <strong>${input.billNumber}</strong></div>
+        <div>Bill No.: <strong>${esc(input.billNumber)}</strong></div>
         <div>Date: <strong>${fmtDate(input.billDate)}</strong></div>
-        <div>Place Of Supply: <strong>${shop.state ?? ""}</strong></div>
+        <div>Place Of Supply: <strong>${esc(placeOfSupply)}</strong></div>
       </div>
     </div>
 
@@ -476,31 +558,11 @@ export function openPurchaseBill(input: PurchaseBillInput, targetWindow?: Window
         <div class="section-title">Tax Summary:</div>
         <table class="tax-table">
           <thead>
-            <tr>
-              <th rowspan="2" style="width: 16%;">HSN/ SAC</th>
-              <th rowspan="2" style="width: 22%;">Taxable<br>amount (₹)</th>
-              <th colspan="2" style="width: 24%;">CGST</th>
-              <th colspan="2" style="width: 24%;">SGST</th>
-              <th rowspan="2" style="width: 14%;">Total Tax<br>(₹)</th>
-            </tr>
-            <tr>
-              <th style="font-size: 8px;">Rate (%)</th>
-              <th style="font-size: 8px;">Amt (₹)</th>
-              <th style="font-size: 8px;">Rate (%)</th>
-              <th style="font-size: 8px;">Amt (₹)</th>
-            </tr>
+            ${taxHeader}
           </thead>
           <tbody>
             ${taxRows}
-            <tr class="font-bold">
-              <td class="col-center">TOTAL</td>
-              <td>${fmt(totalTaxable)}</td>
-              <td></td>
-              <td>${fmt(totalHalf)}</td>
-              <td></td>
-              <td>${fmt(totalHalf)}</td>
-              <td>${fmt(totalTax)}</td>
-            </tr>
+            ${taxTotalRow}
           </tbody>
         </table>
       </div>
@@ -550,12 +612,12 @@ export function openPurchaseBill(input: PurchaseBillInput, targetWindow?: Window
 
   <div class="terms-box">
     <div class="terms-title">Terms &amp; Conditions:</div>
-    <div class="terms-content">Thanks for doing business with us!</div>
+    <div class="terms-content">${termsHtml}</div>
   </div>
 
   <div class="sign-container">
     <div class="sign-box">
-      <div class="sign-title">For ${shop.name.toUpperCase()}:</div>
+      <div class="sign-title">For ${esc(shop.name.toUpperCase())}:</div>
       <div class="sign-space">Authorized Signatory</div>
     </div>
   </div>

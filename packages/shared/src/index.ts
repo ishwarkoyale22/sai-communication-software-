@@ -5,6 +5,7 @@ export * from "./simpleInvoice";
 export * from "./retailTaxInvoice";
 export * from "./purchaseTaxInvoice";
 export * from "./purchaseBill";
+export * from "./purchaseLines";
 export * from "./imei";
 export * from "./paymentSplit";
 export * from "./format";

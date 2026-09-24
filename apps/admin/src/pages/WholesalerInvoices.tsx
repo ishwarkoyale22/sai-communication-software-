@@ -1,13 +1,22 @@
 import { useEffect, useState } from "react";
-import { formatDate, formatCurrency, openPurchaseBill } from "@sai/shared";
+import { formatDate, formatCurrency, openPurchaseBill, lineAmounts, paymentModeLabel } from "@sai/shared";
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { Plus, X, Printer, Eye } from "lucide-react";
+import { PurchaseEntryModal, type PurchaseEntry } from "../components/PurchaseEntryModal";
+import { billFromEntry } from "../lib/purchaseBill";
+import { Plus, Printer, Eye } from "lucide-react";
 
 interface WholesalerInvoice {
   id: string;
   wholesaler_name: string;
+  wholesaler_phone: string | null;
+  wholesaler_gstin: string | null;
+  wholesaler_address: string | null;
+  wholesaler_state: string | null;
+  place_of_supply: string | null;
+  payment_mode: string | null;
+  terms: string | null;
   invoice_number: string | null;
   items: unknown;
   total_amount: number;
@@ -19,20 +28,10 @@ interface WholesalerInvoice {
   notes: string | null;
 }
 
-const empty = {
-  wholesaler_name: "",
-  invoice_number: "",
-  total_amount: 0,
-  paid_amount: 0,
-  invoice_date: new Date().toISOString().slice(0, 10),
-  due_date: "",
-  notes: "",
-};
-
 export function WholesalerInvoices() {
   const [invoices, setInvoices] = useState<WholesalerInvoice[]>([]);
-  const [form, setForm] = useState(empty);
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,30 +50,44 @@ export function WholesalerInvoices() {
     setInvoices((data as WholesalerInvoice[]) ?? []);
   }
 
-  async function addInvoice() {
-    if (!form.wholesaler_name.trim()) {
-      setError("Wholesaler name is required.");
-      return;
-    }
+  async function addInvoice(e: PurchaseEntry) {
+    setSaving(true);
     setError(null);
-    const dueAmount = form.total_amount - form.paid_amount;
+    const dueAmount = Math.max(0, e.totals.total - e.paidAmount);
     const { error: insertErr } = await supabase.from("wholesaler_invoices").insert({
-      wholesaler_name: form.wholesaler_name.trim(),
-      invoice_number: form.invoice_number.trim() || null,
-      items: [],
-      total_amount: form.total_amount,
-      paid_amount: form.paid_amount,
+      wholesaler_name: e.partyName,
+      wholesaler_phone: e.phone || null,
+      wholesaler_gstin: e.gstin || null,
+      wholesaler_address: e.address || null,
+      wholesaler_state: e.partyState || null,
+      place_of_supply: e.placeOfSupply || null,
+      payment_mode: e.paymentMode,
+      terms: e.terms || null,
+      invoice_number: e.billNumber || null,
+      // Line items are kept in full so the bill can be reprinted exactly; `quantity` / `total_price` keep
+      // older readers of this column working.
+      items: e.lines.map((l) => ({
+        name: l.name,
+        hsn_sac: l.hsn_sac || null,
+        serials: l.serials,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        gst_rate: l.gst_rate,
+        total_price: lineAmounts(l).total,
+      })),
+      total_amount: e.totals.total,
+      paid_amount: e.paidAmount,
       due_amount: dueAmount,
-      payment_status: dueAmount <= 0 ? "paid" : form.paid_amount > 0 ? "partial" : "pending",
-      invoice_date: form.invoice_date,
-      due_date: form.due_date || null,
-      notes: form.notes || null,
+      payment_status: dueAmount <= 0.005 ? "paid" : e.paidAmount > 0 ? "partial" : "pending",
+      invoice_date: e.billDate,
+      due_date: e.dueDate || null,
+      notes: e.notes || null,
     });
+    setSaving(false);
     if (insertErr) {
       setError(insertErr.message);
       return;
     }
-    setForm(empty);
     setShowForm(false);
     load();
   }
@@ -82,19 +95,35 @@ export function WholesalerInvoices() {
   function printBill(inv: WholesalerInvoice, mode: "print" | "view" = "print") {
     const rawItems = Array.isArray(inv.items) ? (inv.items as any[]) : [];
     const items = rawItems.length > 0
-      ? rawItems.map((it) => ({
-          name: it.name ?? it.item_name ?? "Item",
-          quantity: it.qty ?? it.quantity ?? 1,
-          totalPrice: it.total_price ?? it.totalPrice ?? 0,
-        }))
+      ? rawItems.map((it) => {
+          const quantity = it.qty ?? it.quantity ?? 1;
+          const hasRate = it.unit_price != null && it.gst_rate != null;
+          return {
+            name: it.name ?? it.item_name ?? "Item",
+            hsnSac: it.hsn_sac ?? it.hsnSac ?? null,
+            quantity,
+            totalPrice: it.total_price ?? it.totalPrice ?? 0,
+            ...(hasRate ? { unitPrice: Number(it.unit_price), gstRate: Number(it.gst_rate) } : {}),
+            serials: Array.isArray(it.serials) ? it.serials : [],
+          };
+        })
       : [{ name: inv.notes || "Wholesale Purchase", quantity: 1, totalPrice: inv.total_amount }];
 
     openPurchaseBill({
       billNumber: inv.invoice_number || inv.id.slice(0, 8).toUpperCase(),
       billDate: inv.invoice_date,
       supplierName: inv.wholesaler_name,
-      paymentMode: inv.payment_status === "paid" ? "paid in full" : inv.payment_status,
+      supplier: {
+        address: inv.wholesaler_address,
+        gstin: inv.wholesaler_gstin,
+        phone: inv.wholesaler_phone,
+        state: inv.wholesaler_state,
+      },
+      placeOfSupply: inv.place_of_supply,
+      // Older invoices have no payment mode — fall back to what their status implies.
+      paymentMode: inv.payment_mode || (inv.payment_status === "paid" ? "cash" : "credit"),
       paidAmount: inv.paid_amount,
+      terms: inv.terms,
       items,
       totalAmount: inv.total_amount,
       mode,
@@ -110,16 +139,24 @@ export function WholesalerInvoices() {
           <ExportExcelButton
             rows={invoices.map((i) => ({
               Wholesaler: i.wholesaler_name,
+              GSTIN: i.wholesaler_gstin ?? "",
               "Invoice #": i.invoice_number,
               Total: i.total_amount,
               Paid: i.paid_amount,
               Due: i.due_amount,
+              "Payment Mode": i.payment_mode ? paymentModeLabel(i.payment_mode) : "",
               Status: i.payment_status,
               Date: i.invoice_date,
             }))}
             fileName="wholesaler-invoices"
           />
-          <button className="btn-primary" onClick={() => setShowForm(true)}>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setError(null);
+              setShowForm(true);
+            }}
+          >
             <Plus size={14} /> Add Invoice
           </button>
         </div>
@@ -134,6 +171,7 @@ export function WholesalerInvoices() {
               <th className="text-right">Total</th>
               <th className="text-right">Paid</th>
               <th className="text-right">Due</th>
+              <th>Mode</th>
               <th>Status</th>
               <th>Date</th>
               <th className="text-right">Bill</th>
@@ -142,11 +180,15 @@ export function WholesalerInvoices() {
           <tbody>
             {invoices.map((i) => (
               <tr key={i.id}>
-                <td className="font-medium">{i.wholesaler_name}</td>
+                <td>
+                  <div className="font-medium">{i.wholesaler_name}</div>
+                  {i.wholesaler_gstin && <div className="text-[11px] text-gray-400">{i.wholesaler_gstin}</div>}
+                </td>
                 <td className="text-gray-500">{i.invoice_number ?? "-"}</td>
                 <td className="text-right">{formatCurrency(i.total_amount)}</td>
                 <td className="text-right">{formatCurrency(i.paid_amount)}</td>
                 <td className="text-right">{formatCurrency(i.due_amount ?? 0)}</td>
+                <td className="text-gray-500">{i.payment_mode ? paymentModeLabel(i.payment_mode) : "-"}</td>
                 <td>
                   <StatusPill status={i.payment_status} />
                 </td>
@@ -165,7 +207,7 @@ export function WholesalerInvoices() {
             ))}
             {invoices.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-gray-400">No invoices recorded yet.</td>
+                <td colSpan={9} className="py-8 text-center text-gray-400">No invoices recorded yet.</td>
               </tr>
             )}
           </tbody>
@@ -173,30 +215,17 @@ export function WholesalerInvoices() {
       </div>
 
       {showForm && (
-        <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/30">
-          <div className="card w-96 space-y-2.5 p-5">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-800">Add Wholesaler Invoice</h2>
-              <button onClick={() => setShowForm(false)}><X size={16} /></button>
-            </div>
-            {error && <div className="rounded-md border border-red-200 bg-red-50 p-2 text-xs text-brand-danger">{error}</div>}
-            <input className="input" placeholder="Wholesaler name *" value={form.wholesaler_name} onChange={(e) => setForm({ ...form, wholesaler_name: e.target.value })} />
-            <input className="input" placeholder="Invoice number" value={form.invoice_number} onChange={(e) => setForm({ ...form, invoice_number: e.target.value })} />
-            <div className="grid grid-cols-2 gap-2">
-              <input type="number" className="input" placeholder="Total amount" value={form.total_amount || ""} onChange={(e) => setForm({ ...form, total_amount: Number(e.target.value) })} />
-              <input type="number" className="input" placeholder="Paid amount" value={form.paid_amount || ""} onChange={(e) => setForm({ ...form, paid_amount: Number(e.target.value) })} />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <input type="date" className="input" value={form.invoice_date} onChange={(e) => setForm({ ...form, invoice_date: e.target.value })} />
-              <input type="date" className="input" placeholder="Due date" value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
-            </div>
-            <textarea className="input" placeholder="Notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
-            <div className="flex justify-end gap-2 pt-2">
-              <button className="btn-ghost" onClick={() => setShowForm(false)}>Cancel</button>
-              <button className="btn-primary" onClick={addInvoice}>Save</button>
-            </div>
-          </div>
-        </div>
+        <PurchaseEntryModal
+          title="Add Wholesaler Invoice"
+          partyLabel="Wholesaler"
+          showDueDate
+          shopState={SHOP.state}
+          error={error}
+          saving={saving}
+          onClose={() => setShowForm(false)}
+          onSave={addInvoice}
+          onPreview={(e) => openPurchaseBill(billFromEntry(e, "view"))}
+        />
       )}
     </div>
   );
