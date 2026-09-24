@@ -222,7 +222,7 @@ export type PaymentMethod = "cash" | "card" | "upi" | "bank_transfer" | "other";
 // The live `sales.payment_method` check constraint — matches "cash",
 // "upi", "card", "emi", "credit" (not the values in PaymentMethod above,
 // which predate the same schema drift documented on the Inventory type).
-export type SalePaymentMethod = "cash" | "upi" | "card" | "emi" | "credit";
+export type SalePaymentMethod = "cash" | "upi" | "card" | "emi" | "credit" | "bank_transfer";
 export type SaleTypeLive = "in_store" | "website" | "emi";
 export type SalePaymentStatus = "paid" | "pending" | "partial";
 

@@ -272,6 +272,8 @@ export function WebOrders() {
                           <option value="product">Product</option>
                           <option value="gift">Gift</option>
                           <option value="giveaway">Giveaway</option>
+                          <option value="hamper">Hamper</option>
+                          <option value="mixed">Mixed (products + hamper)</option>
                         </select>
                       </td>
                       <td>
