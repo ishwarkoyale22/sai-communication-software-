@@ -205,3 +205,12 @@
     @apply pointer-events-none opacity-60;
   }
 }
+
+/* Horizontally scrollable chip rows on mobile: keep the swipe, hide the bar
+   (it drew a thick grey line across the chip borders). */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}

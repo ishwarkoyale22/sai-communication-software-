@@ -3,6 +3,7 @@ import { formatCurrency } from "@sai/shared";
 import { Receipt } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
+import { dbTime } from "../lib/time";
 
 interface Sale {
   id: string;
@@ -48,7 +49,7 @@ export function SalesHistory() {
                   <Receipt size={13} className="shrink-0 text-brand-primary" /> {s.invoice_number}
                 </div>
                 <div className="truncate text-xs text-gray-500">{s.customer_name}</div>
-                <div className="text-[11px] text-gray-400">{new Date(s.created_at).toLocaleString("en-IN")}</div>
+                <div className="text-[11px] text-gray-400">{dbTime(s.created_at).toLocaleString("en-IN")}</div>
               </div>
               <div className="shrink-0 text-right">
                 <div className="text-sm font-semibold text-gray-800">{formatCurrency(s.final_amount)}</div>

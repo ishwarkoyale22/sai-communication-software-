@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { Upload, FileText } from "lucide-react";
+import { dbTime } from "../lib/time";
 
 interface Customer {
   id: string;
@@ -164,7 +165,7 @@ export function ClientReports() {
               <FileText size={16} className="mt-0.5 shrink-0 text-brand-primary" />
               <div className="min-w-0 flex-1">
                 <div className="text-sm font-medium">{r.title}</div>
-                <div className="text-xs text-gray-400">{new Date(r.created_at).toLocaleString("en-IN")}</div>
+                <div className="text-xs text-gray-400">{dbTime(r.created_at).toLocaleString("en-IN")}</div>
               </div>
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium ${STATUS_STYLE[r.status]}`}>
                 {r.status.replace(/_/g, " ")}

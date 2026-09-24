@@ -142,7 +142,7 @@ export function Login() {
   }
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-page px-4 py-10">
+    <div className="relative flex min-h-screen items-center justify-center overflow-clip bg-page px-4 py-10">
       {/* Atmosphere — soft gold + deep-blue glows behind the card, echoing
           the sidebar's medallion glow so the login screen reads as part of
           the same brand instead of a bare form on a flat background. */}

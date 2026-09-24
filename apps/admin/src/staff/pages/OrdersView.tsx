@@ -3,6 +3,7 @@ import { formatCurrency } from "@sai/shared";
 import { ShoppingBag } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
+import { dbTime } from "../lib/time";
 
 interface Order {
   id: string;
@@ -55,7 +56,7 @@ export function OrdersView() {
               </div>
               <div className="text-xs text-gray-600">{o.customer_name}</div>
               <div className="flex items-center justify-between text-xs text-gray-400">
-                <span>{new Date(o.created_at).toLocaleString("en-IN")}</span>
+                <span>{dbTime(o.created_at).toLocaleString("en-IN")}</span>
                 <span className="font-semibold text-brand-primary">{formatCurrency(o.total_amount)}</span>
               </div>
             </div>

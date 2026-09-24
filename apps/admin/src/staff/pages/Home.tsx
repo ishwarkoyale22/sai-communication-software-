@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
+import { dbTime } from "../lib/time";
 
 const CONFETTI = ["🎉", "🎈", "🎂", "🎊", "🌸", "✨"];
 
@@ -17,7 +18,7 @@ function greeting() {
 }
 
 function workedHours(clockIn: string, asOf: number) {
-  const ms = asOf - new Date(clockIn).getTime();
+  const ms = Math.max(0, asOf - new Date(clockIn).getTime()); // never negative when this device clock lags the server
   const h = Math.floor(ms / 3600000);
   const m = Math.floor((ms % 3600000) / 60000);
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
@@ -73,8 +74,16 @@ export function Home() {
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [activity, setActivity] = useState<{ id: string; action: string; created_at: string }[]>([]);
   const [now, setNow] = useState(Date.now());
-  const [showCelebration, setShowCelebration] = useState(true);
-  const [wishedIds, setWishedIds] = useState<string[]>([]);
+  // The birthday popup shows once per person per day (remembered on this device),
+  // not on every visit to Home.
+  const celebrationKey = `sai_bday_seen_${staff?.id}_${new Date().toDateString()}`;
+  const [showCelebration, setShowCelebration] = useState(() => {
+    try { return !localStorage.getItem(celebrationKey); } catch { return true; }
+  });
+  function closeCelebration() {
+    setShowCelebration(false);
+    try { localStorage.setItem(celebrationKey, "1"); } catch { /* ignore */ }
+  }
 
   const role = staff?.role;
   const links = role === "technician" ? TECHNICIAN_LINKS : role === "sales" ? SALES_LINKS : role === "receptionist" ? RECEPTIONIST_LINKS : LEGACY_LINKS;
@@ -85,7 +94,6 @@ export function Home() {
 
   async function wish(id: string) {
     await sendBirthdayWish(id);
-    setWishedIds((prev) => [...prev, id]);
   }
 
   useEffect(() => {
@@ -114,7 +122,7 @@ export function Home() {
         todayStart.setHours(0, 0, 0, 0);
         const salesRows = (sales.data as { final_amount: number; created_at: string }[]) ?? [];
         setCounts({
-          todaySales: salesRows.filter((s) => new Date(s.created_at).getTime() >= todayStart.getTime()).length,
+          todaySales: salesRows.filter((s) => dbTime(s.created_at).getTime() >= todayStart.getTime()).length,
           followUps: ((followUps.data as { status: string }[]) ?? []).filter((f) => f.status === "pending").length,
           pendingTasks: ((tasks.data as { status: string }[]) ?? []).filter((t) => t.status !== "completed").length,
         });
@@ -179,7 +187,7 @@ export function Home() {
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
           <div className="relative w-full max-w-xs overflow-hidden rounded-2xl bg-gradient-to-br from-gold via-gold to-goldDim p-6 text-center text-white shadow-xl">
             <button
-              onClick={() => setShowCelebration(false)}
+              onClick={closeCelebration}
               className="absolute right-3 top-3 text-white/80 hover:text-white"
               aria-label="Close"
             >
@@ -211,7 +219,7 @@ export function Home() {
       )}
 
       {otherBirthdays.length > 0 && (
-        <div className="card flex items-center justify-between gap-2 border-gold/40 bg-gold/5 p-3">
+        <div className="card flex flex-wrap items-center justify-between gap-2 border-gold/40 bg-gold/5 p-3">
           <div className="flex items-center gap-2 text-sm">
             <PartyPopper size={16} className="text-gold" />
             <span className="font-medium text-gray-700">
@@ -222,11 +230,11 @@ export function Home() {
             {otherBirthdays.map((b) => (
               <button
                 key={b.id}
-                disabled={wishedIds.includes(b.id)}
+                disabled={!!b.already_wished}
                 onClick={() => wish(b.id)}
-                className="rounded-lg bg-gold/15 px-2.5 py-1 text-xs font-semibold text-goldDim disabled:opacity-50"
+                className="whitespace-nowrap rounded-lg bg-gold/15 px-2.5 py-1 text-xs font-semibold text-goldDim disabled:opacity-50"
               >
-                {wishedIds.includes(b.id) ? "Wished ✓" : `Wish ${b.name.split(" ")[0]}`}
+                {b.already_wished ? "Wished ✓" : `Wish ${b.name.split(" ")[0]}`}
               </button>
             ))}
           </div>
@@ -312,7 +320,7 @@ export function Home() {
                     <span className="h-1.5 w-1.5 rounded-full bg-gold" />
                     {a.action.replace(/_/g, " ")}
                   </span>
-                  <span className="text-gray-400">{new Date(a.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+                  <span className="text-gray-400">{dbTime(a.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
                 </li>
               ))}
             </ul>

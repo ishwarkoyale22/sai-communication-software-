@@ -3,6 +3,7 @@ import { formatCurrency } from "@sai/shared";
 import { Target } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
+import { dbTime } from "../lib/time";
 
 interface SalesTarget {
   period: "daily" | "weekly" | "monthly";
@@ -47,7 +48,7 @@ export function SalesTargets() {
   const rows = (["daily", "weekly", "monthly"] as const).map((period) => {
     const target = targets.find((t) => t.period === period)?.target_amount ?? 0;
     const since = periodStart(period).getTime();
-    const achieved = sales.filter((s) => new Date(s.created_at).getTime() >= since).reduce((sum, s) => sum + s.final_amount, 0);
+    const achieved = sales.filter((s) => dbTime(s.created_at).getTime() >= since).reduce((sum, s) => sum + s.final_amount, 0);
     return { period, target, achieved, pct: target > 0 ? Math.min(100, Math.round((achieved / target) * 100)) : 0 };
   });
 

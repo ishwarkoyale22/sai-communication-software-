@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { MessageSquareText } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
+import { dbTime } from "../lib/time";
 
 interface Enquiry {
   id: string;
@@ -17,6 +18,7 @@ interface Enquiry {
 const STATUS_STYLE: Record<string, string> = {
   new: "bg-blue-50 text-blue-700",
   contacted: "bg-amber-50 text-amber-700",
+  in_progress: "bg-purple-50 text-purple-700",
   resolved: "bg-emerald-50 text-emerald-700",
 };
 
@@ -61,7 +63,7 @@ export function Enquiries() {
               {e.subject && <div className="text-xs font-medium text-gray-600">{e.subject}</div>}
               {e.message && <div className="text-xs text-gray-500">{e.message}</div>}
               <div className="text-xs text-gray-400">{e.phone}{e.email ? ` · ${e.email}` : ""}</div>
-              <div className="text-[11px] text-gray-400">{new Date(e.created_at).toLocaleString("en-IN")}</div>
+              <div className="text-[11px] text-gray-400">{dbTime(e.created_at).toLocaleString("en-IN")}</div>
             </div>
           ))}
         </div>

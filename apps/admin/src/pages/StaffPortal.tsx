@@ -81,6 +81,17 @@ export function StaffPortal() {
       supabase.from("staff_tasks").select("*").order("created_at", { ascending: false }),
     ]);
     setStaff((s as Staff[]) ?? []);
+    // Remember who Admin has already wished today, so "Wished ✓" survives leaving the page
+    // and a second click can't send the same wish again.
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const { data: wishes } = await supabase
+      .from("notifications")
+      .select("staff_id")
+      .eq("type", "birthday_wish")
+      .is("related_id", null)
+      .gte("created_at", dayStart.toISOString());
+    setWishedIds(((wishes as { staff_id: string }[]) ?? []).map((w) => w.staff_id));
     setAttendance((a as AttendanceRow[]) ?? []);
     setLeave((l as LeaveRow[]) ?? []);
     setTasks((t as TaskRow[]) ?? []);
@@ -92,19 +103,21 @@ export function StaffPortal() {
 
   const todaysBirthdays = staff.filter((s) => {
     if (!s.date_of_birth) return false;
-    const dob = new Date(s.date_of_birth);
+    // date_of_birth is a plain "YYYY-MM-DD" — compare the text, not a Date (which shifts by timezone).
+    const [, m, d] = s.date_of_birth.split("-").map(Number);
     const now = new Date();
-    return dob.getMonth() === now.getMonth() && dob.getDate() === now.getDate();
+    return m === now.getMonth() + 1 && d === now.getDate();
   });
 
   async function wishBirthday(s: Staff) {
+    if (wishedIds.includes(s.id)) return;
+    setWishedIds((prev) => [...prev, s.id]);
     await supabase.from("notifications").insert({
       staff_id: s.id,
       type: "birthday_wish",
       title: "Happy Birthday! 🎂",
       body: "Admin wished you a happy birthday!",
     });
-    setWishedIds((prev) => [...prev, s.id]);
   }
 
   async function reviewLeave(id: string, status: "approved" | "rejected") {

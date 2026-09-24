@@ -132,7 +132,7 @@ export function Clients() {
             {error && <div className="mb-2 text-xs text-brand-danger">{error}</div>}
             <div className="space-y-2">
               <input className="input w-full" placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-              <input className="input w-full" placeholder="Phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+              <input className="input w-full" placeholder="Phone" inputMode="numeric" maxLength={10} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
               <textarea className="input w-full" placeholder="Notes (optional)" rows={3} value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
               <button onClick={addClient} disabled={saving} className="btn-primary w-full">
                 {saving ? "Saving…" : "Save Client"}

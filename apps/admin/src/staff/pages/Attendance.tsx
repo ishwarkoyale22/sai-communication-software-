@@ -10,7 +10,8 @@ interface AttendanceRow {
 }
 
 export function AttendancePage() {
-  const { token, openAttendance, clockOut } = useStaffAuth();
+  const { token, openAttendance, clockIn, clockOut } = useStaffAuth();
+  const [error, setError] = useState<string | null>(null);
   const [history, setHistory] = useState<AttendanceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState(false);
@@ -34,9 +35,18 @@ export function AttendancePage() {
     setWorking(false);
   }
 
+  async function handleClockIn() {
+    setWorking(true);
+    setError(null);
+    const res = await clockIn();
+    if (res.error) setError(res.error);
+    await load();
+    setWorking(false);
+  }
+
   function duration(row: AttendanceRow) {
     const end = row.clock_out ? new Date(row.clock_out) : new Date();
-    const mins = (end.getTime() - new Date(row.clock_in).getTime()) / 60000;
+    const mins = Math.max(0, end.getTime() - new Date(row.clock_in).getTime()) / 60000;
     return `${Math.floor(mins / 60)}h ${Math.round(mins % 60)}m`;
   }
 
@@ -56,12 +66,17 @@ export function AttendancePage() {
             </p>
           )}
         </div>
-        {openAttendance && (
+        {openAttendance ? (
           <button className="btn-primary text-sm" disabled={working} onClick={handleClockOut}>
             {working ? "Clocking out…" : "Clock Out"}
           </button>
+        ) : (
+          <button className="btn-primary text-sm" disabled={working} onClick={handleClockIn}>
+            {working ? "Checking in…" : "Check In"}
+          </button>
         )}
       </div>
+      {error && <div className="text-xs text-brand-danger">{error}</div>}
 
       <div className="card divide-y divide-border">
         <div className="p-3 text-xs font-semibold uppercase text-gray-400">History</div>

@@ -153,7 +153,7 @@ export function RepairsPage() {
               </div>
               <p className="text-xs text-gray-600">{r.customer_name} · {r.phone}</p>
               <p className="text-xs text-gray-600">{r.problem}</p>
-              {tab === "active" && (
+              {(tab === "active" || r.status === "completed") && (
                 <select
                   className="input mt-1 !py-1 text-xs"
                   value={r.status}
@@ -165,7 +165,7 @@ export function RepairsPage() {
                   ))}
                 </select>
               )}
-              {tab === "history" && <span className="pill-info text-[11px]">{STATUS_LABEL[r.status]}</span>}
+              {tab === "history" && r.status !== "completed" && <span className="pill-info text-[11px]">{STATUS_LABEL[r.status]}</span>}
 
               <button
                 onClick={() => expand(r)}

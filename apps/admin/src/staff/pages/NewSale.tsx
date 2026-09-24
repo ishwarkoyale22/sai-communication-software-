@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { formatCurrency } from "@sai/shared";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Minus, Trash2 } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
 import { fetchHamperCatalog, hamperDisplayName, maxAddableHampers, type HamperCatalog, type ComponentInventory } from "../../lib/hampers";
@@ -68,8 +68,9 @@ export function NewSale() {
     fetchHamperCatalog(supabase, { activeOnly: true, withCosts: false }).then(setCatalog);
   }
 
-  useEffect(() => {
-    refreshHampers();
+  // Products/gifts on hand — reloaded after every sale so the stock counts in
+  // the dropdowns never go stale.
+  function loadStock() {
     supabase
       .from("inventory")
       .select("id, name, model, price, stock, is_serialized")
@@ -85,7 +86,17 @@ export function NewSale() {
       .gt("stock", 0)
       .order("name")
       .then(({ data }) => setGifts((data as GiftItem[]) ?? []));
+  }
+
+  useEffect(() => {
+    refreshHampers();
+    loadStock();
   }, []);
+
+  // Messages render at the top of the page — bring them into view on a small screen.
+  useEffect(() => {
+    if (error || success) document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [error, success]);
 
   function addToCart() {
     const item = products.find((p) => p.id === pickId);
@@ -140,6 +151,44 @@ export function NewSale() {
     setPickHamperId("");
   }
 
+  // Quantity steppers for plain items and gifts, capped at the stock on hand.
+  function stepItem(key: string, delta: number) {
+    setError(null);
+    setCart((prev) =>
+      prev.map((l) => {
+        if (l.key !== key) return l;
+        const stock = products.find((p) => p.id === l.inventory_id)?.stock ?? Infinity;
+        // Stock already claimed by this cart (plain lines + hamper components).
+        if (delta > 0 && (unitsUsed().get(l.inventory_id) ?? 0) + delta > stock) {
+          setError(`Only ${stock} of "${l.item_name}" in stock (hampers in this cart use some).`);
+          return l;
+        }
+        return { ...l, quantity: Math.max(1, l.quantity + delta) };
+      })
+    );
+  }
+  function stepGift(key: string, delta: number) {
+    setError(null);
+    setGiftCart((prev) =>
+      prev.map((l) => {
+        if (l.key !== key) return l;
+        const stock = gifts.find((g) => g.id === l.gift_id)?.stock ?? Infinity;
+        if (delta > 0 && l.quantity + delta > stock) {
+          setError(`Only ${stock} of "${l.name}" in stock.`);
+          return l;
+        }
+        return { ...l, quantity: Math.max(1, l.quantity + delta) };
+      })
+    );
+  }
+  const stepper = (qty: number, onStep: (d: number) => void) => (
+    <span className="mx-1 flex shrink-0 items-center gap-1">
+      <button type="button" aria-label="Decrease quantity" onClick={() => onStep(-1)} className="flex h-6 w-6 items-center justify-center rounded border border-gray-200 text-gray-500"><Minus size={12} /></button>
+      <span className="w-5 text-center text-gray-600">{qty}</span>
+      <button type="button" aria-label="Increase quantity" onClick={() => onStep(1)} className="flex h-6 w-6 items-center justify-center rounded border border-gray-200 text-gray-500"><Plus size={12} /></button>
+    </span>
+  );
+
   const total =
     cart.reduce((s, l) => s + l.quantity * l.unit_price, 0) +
     giftCart.reduce((s, l) => s + l.quantity * l.unit_price, 0) +
@@ -149,6 +198,10 @@ export function NewSale() {
     if (!token) return;
     if (!customerName.trim()) {
       setError("Customer name is required.");
+      return;
+    }
+    if (customerPhone.trim() && !/^[6-9]\d{9}$/.test(customerPhone.trim())) {
+      setError("Enter a valid 10-digit mobile number, or leave the phone blank.");
       return;
     }
     if (cart.length === 0 && giftCart.length === 0 && hamperCart.length === 0) {
@@ -178,6 +231,7 @@ export function NewSale() {
     setGiftCart([]);
     setHamperCart([]);
     refreshHampers();
+    loadStock();
     setCustomerName("");
     setCustomerPhone("");
     setTimeout(() => setSuccess(null), 4000);
@@ -191,7 +245,7 @@ export function NewSale() {
 
       <div className="card space-y-2.5 p-4">
         <input className="input w-full" placeholder="Customer name *" value={customerName} onChange={(e) => setCustomerName(e.target.value)} />
-        <input className="input w-full" placeholder="Phone" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
+        <input className="input w-full" placeholder="Phone" inputMode="numeric" maxLength={10} value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} />
 
         <div className="flex gap-2">
           <select className="input flex-1" value={pickId} onChange={(e) => setPickId(e.target.value)}>
@@ -204,11 +258,13 @@ export function NewSale() {
         </div>
 
         {cart.map((l) => (
-          <div key={l.key} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm">
-            <span className="flex-1 truncate">{l.item_name}</span>
-            <span className="w-16 text-right text-gray-500">×{l.quantity}</span>
-            <span className="w-20 text-right font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
-            <button onClick={() => setCart((prev) => prev.filter((x) => x.key !== l.key))} className="ml-2 text-brand-danger"><Trash2 size={13} /></button>
+          <div key={l.key} className="rounded border border-gray-200 p-2 text-sm">
+            <div className="break-words text-gray-700">{l.item_name}</div>
+            <div className="mt-1.5 flex items-center justify-between">
+              {stepper(l.quantity, (d) => stepItem(l.key, d))}
+              <span className="ml-auto font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
+              <button onClick={() => setCart((prev) => prev.filter((x) => x.key !== l.key))} aria-label="Remove item" className="ml-3 text-brand-danger"><Trash2 size={14} /></button>
+            </div>
           </div>
         ))}
 
@@ -223,11 +279,13 @@ export function NewSale() {
         </div>
 
         {giftCart.map((l) => (
-          <div key={l.key} className="flex items-center justify-between rounded border border-gray-200 p-2 text-sm">
-            <span className="flex-1 truncate">🎁 {l.name}</span>
-            <span className="w-16 text-right text-gray-500">×{l.quantity}</span>
-            <span className="w-20 text-right font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
-            <button onClick={() => setGiftCart((prev) => prev.filter((x) => x.key !== l.key))} className="ml-2 text-brand-danger"><Trash2 size={13} /></button>
+          <div key={l.key} className="rounded border border-gray-200 p-2 text-sm">
+            <div className="break-words text-gray-700">🎁 {l.name}</div>
+            <div className="mt-1.5 flex items-center justify-between">
+              {stepper(l.quantity, (d) => stepGift(l.key, d))}
+              <span className="ml-auto font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
+              <button onClick={() => setGiftCart((prev) => prev.filter((x) => x.key !== l.key))} aria-label="Remove gift" className="ml-3 text-brand-danger"><Trash2 size={14} /></button>
+            </div>
           </div>
         ))}
 
@@ -248,8 +306,8 @@ export function NewSale() {
 
         {hamperCart.map((l) => (
           <div key={l.key} className="rounded border border-gray-200 p-2 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="flex-1 truncate">🧺 {l.name.split(" (")[0]}</span>
+            <div className="break-words text-gray-700">🧺 {l.name.split(" (")[0]}</div>
+            <div className="mt-1.5 flex items-center justify-between">
               <input
                 type="number"
                 min={1}
@@ -263,10 +321,10 @@ export function NewSale() {
                   setHamperCart((prev) => prev.map((x) => (x.key === l.key ? { ...x, quantity: Math.max(1, Math.min(wanted, room)) } : x)));
                 }}
               />
-              <span className="w-20 text-right font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
-              <button onClick={() => setHamperCart((prev) => prev.filter((x) => x.key !== l.key))} className="ml-2 text-brand-danger"><Trash2 size={13} /></button>
+              <span className="ml-auto font-medium">{formatCurrency(l.quantity * l.unit_price)}</span>
+              <button onClick={() => setHamperCart((prev) => prev.filter((x) => x.key !== l.key))} aria-label="Remove hamper" className="ml-3 text-brand-danger"><Trash2 size={14} /></button>
             </div>
-            <div className="mt-0.5 truncate text-xs text-gray-400">{l.name.includes(" (") ? l.name.slice(l.name.indexOf("(")) : ""}</div>
+            <div className="mt-1 break-words text-xs text-gray-400">{l.name.includes(" (") ? l.name.slice(l.name.indexOf("(")) : ""}</div>
           </div>
         ))}
 

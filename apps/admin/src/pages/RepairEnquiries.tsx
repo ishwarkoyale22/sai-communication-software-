@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
 import { supabase } from "../lib/supabase";
+import { parseDbTimestamp } from "@sai/shared";
 import { repairEnquiryStatusFor } from "../lib/repairEnquiryStatus";
 import { ArrowRight, Wrench } from "lucide-react";
 
@@ -167,7 +168,7 @@ export function RepairEnquiries() {
                     {e.phone_brand} {e.phone_model}
                   </td>
                   <td>{e.problem_type}</td>
-                  <td className="text-gray-500">{new Date(e.created_at).toLocaleString("en-IN")}</td>
+                  <td className="text-gray-500">{parseDbTimestamp(e.created_at).toLocaleString("en-IN")}</td>
                   <td>
                     {linkedRepair ? (
                       <StatusPill status="approved" label="Converted" />

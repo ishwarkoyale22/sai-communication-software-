@@ -52,7 +52,7 @@ export function ProductsView() {
           className="input w-full pl-9"
         />
       </div>
-      <div className="flex gap-1.5 overflow-x-auto pb-1">
+      <div className="flex gap-1.5 no-scrollbar overflow-x-auto pb-1">
         {categories.map((c) => (
           <button
             key={c}

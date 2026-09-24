@@ -10,6 +10,9 @@ interface Offer {
   discount_value: number | null;
   coupon_code: string | null;
   is_active: boolean;
+  starts_at?: string | null;
+  ends_at?: string | null;
+  offer_products?: { inventory: { name: string; model: string | null } | null }[];
 }
 
 // `offers` already has a public SELECT policy (used by the website hero
@@ -21,11 +24,16 @@ export function OffersView() {
   useEffect(() => {
     supabase
       .from("offers")
-      .select("id, title, description, offer_type, discount_value, coupon_code, is_active")
+      .select("id, title, description, offer_type, discount_value, coupon_code, is_active, starts_at, ends_at, offer_products(inventory(name, model))")
       .eq("is_active", true)
       .order("created_at", { ascending: false })
       .then(({ data }) => {
-        setOffers((data as Offer[]) ?? []);
+        // Only offers running right now (not scheduled for later, not ended).
+        const now = Date.now();
+        const live = ((data as unknown as Offer[]) ?? []).filter(
+          (o) => (!o.starts_at || new Date(o.starts_at).getTime() <= now) && (!o.ends_at || new Date(o.ends_at).getTime() >= now)
+        );
+        setOffers(live);
         setLoading(false);
       });
   }, []);
@@ -45,6 +53,11 @@ export function OffersView() {
                 <Tag size={14} className="text-brand-primary" /> {o.title}
               </div>
               {o.description && <div className="text-xs text-gray-500">{o.description}</div>}
+              <div className="text-xs text-gray-500">
+                {o.offer_products && o.offer_products.length > 0
+                  ? `Applies to: ${o.offer_products.map((p) => [p.inventory?.name, p.inventory?.model].filter(Boolean).join(" ")).join(", ")}`
+                  : "Applies to: whole store"}
+              </div>
               <div className="flex items-center gap-2 text-xs">
                 {o.offer_type === "percentage" && o.discount_value != null && <span className="pill-info">{o.discount_value}% off</span>}
                 {o.offer_type === "rupee_off" && o.discount_value != null && <span className="pill-info">₹{o.discount_value} off</span>}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Plus, X, Wrench } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import { useStaffAuth } from "../context/StaffAuthContext";
+import { dbTime } from "../lib/time";
 
 interface RepairEnquiry {
   id: string;
@@ -53,6 +54,10 @@ export function RepairIntake() {
   async function submit() {
     if (!form.customer_name.trim() || !form.phone.trim()) {
       setError("Customer name and phone are required.");
+      return;
+    }
+    if (!/^[6-9]\d{9}$/.test(form.phone.trim())) {
+      setError("Enter a valid 10-digit mobile number.");
       return;
     }
     setSaving(true);
@@ -109,7 +114,7 @@ export function RepairIntake() {
               <div className="text-xs text-gray-600">{r.phone_brand} {r.phone_model} — {r.problem_type}</div>
               {r.description && <div className="text-xs text-gray-500">{r.description}</div>}
               <div className="text-xs text-gray-400">{r.phone}</div>
-              <div className="text-[11px] text-gray-400">{new Date(r.created_at).toLocaleString("en-IN")}</div>
+              <div className="text-[11px] text-gray-400">{dbTime(r.created_at).toLocaleString("en-IN")}</div>
             </div>
           ))}
         </div>
@@ -117,14 +122,14 @@ export function RepairIntake() {
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setShowForm(false)}>
-          <div className="w-full space-y-2 rounded-t-2xl bg-card p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[90vh] w-full space-y-2 overflow-y-auto rounded-t-2xl bg-card p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mb-1 flex items-center justify-between">
               <h3 className="text-sm font-semibold">New Repair Intake</h3>
               <button onClick={() => setShowForm(false)}><X size={18} /></button>
             </div>
             {error && <div className="text-xs text-brand-danger">{error}</div>}
             <input className="input w-full" placeholder="Customer name *" value={form.customer_name} onChange={(e) => setForm({ ...form, customer_name: e.target.value })} />
-            <input className="input w-full" placeholder="Phone *" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+            <input className="input w-full" placeholder="Phone *" inputMode="numeric" maxLength={10} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
             <div className="grid grid-cols-2 gap-2">
               <input className="input" placeholder="Brand" value={form.phone_brand} onChange={(e) => setForm({ ...form, phone_brand: e.target.value })} />
               <input className="input" placeholder="Model" value={form.phone_model} onChange={(e) => setForm({ ...form, phone_model: e.target.value })} />

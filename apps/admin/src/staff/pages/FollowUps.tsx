@@ -87,23 +87,27 @@ export function FollowUps() {
   }
 
   // Reschedule keeps the follow-up open on a new date (marking it "rescheduled" would drop it from every tab).
-  async function reschedule(f: FollowUp) {
-    if (!token) return;
-    const next = window.prompt("New follow-up date (YYYY-MM-DD)", f.follow_up_date);
-    if (!next) return;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) {
-      window.alert("Please enter the date as YYYY-MM-DD.");
+  const [resched, setResched] = useState<{ f: FollowUp; date: string } | null>(null);
+  const [reschedError, setReschedError] = useState("");
+  async function confirmReschedule() {
+    if (!token || !resched) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(resched.date)) {
+      setReschedError("Pick a new date.");
       return;
     }
-    const { data, error: err } = await supabase.rpc("staff_reschedule_followup", { p_token: token, p_follow_up_id: f.id, p_new_date: next });
+    const { data, error: err } = await supabase.rpc("staff_reschedule_followup", { p_token: token, p_follow_up_id: resched.f.id, p_new_date: resched.date });
     if (err || !data?.success) {
-      window.alert(err?.message || data?.error || "Could not reschedule.");
+      setReschedError(err?.message || data?.error || "Could not reschedule.");
       return;
     }
+    setResched(null);
+    setReschedError("");
     load();
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  // Local calendar date (toISOString is UTC, which is yesterday in India before 5:30 AM).
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   const filtered = followUps.filter((f) => {
     if (tab === "today") return f.follow_up_date === today && f.status === "pending";
     if (tab === "upcoming") return f.follow_up_date > today && f.status === "pending";
@@ -154,7 +158,7 @@ export function FollowUps() {
                   <button onClick={() => updateStatus(f.id, "completed")} className="rounded-md bg-brand-success/10 px-2 py-1 text-xs font-medium text-brand-success">
                     Complete
                   </button>
-                  <button onClick={() => reschedule(f)} className="rounded-md bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
+                  <button onClick={() => { setReschedError(""); setResched({ f, date: f.follow_up_date }); }} className="rounded-md bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
                     Reschedule
                   </button>
                   <button onClick={() => updateStatus(f.id, "cancelled")} className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500">
@@ -169,7 +173,7 @@ export function FollowUps() {
 
       {showAdd && (
         <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setShowAdd(false)}>
-          <div className="w-full rounded-t-2xl bg-card p-4" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[90vh] w-full overflow-y-auto rounded-t-2xl bg-card p-4" onClick={(e) => e.stopPropagation()}>
             <div className="mb-3 flex items-center justify-between">
               <h3 className="text-sm font-semibold">New Follow-up</h3>
               <button onClick={() => setShowAdd(false)}>
@@ -193,6 +197,21 @@ export function FollowUps() {
                 {saving ? "Saving…" : "Create Follow-up"}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+      {resched && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/40" onClick={() => setResched(null)}>
+          <div className="w-full space-y-2 rounded-t-2xl bg-card p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-1 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Reschedule follow-up</h3>
+              <button onClick={() => setResched(null)}>
+                <X size={18} />
+              </button>
+            </div>
+            {reschedError && <div className="text-xs text-brand-danger">{reschedError}</div>}
+            <input type="date" className="input w-full" value={resched.date} onChange={(e) => setResched({ ...resched, date: e.target.value })} />
+            <button onClick={confirmReschedule} className="btn-primary w-full">Save new date</button>
           </div>
         </div>
       )}

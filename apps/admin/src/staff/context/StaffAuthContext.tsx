@@ -28,6 +28,7 @@ export interface BirthdayEntry {
   id: string;
   name: string;
   is_self: boolean;
+  already_wished?: boolean;
 }
 
 interface StaffAuthState {
@@ -38,6 +39,8 @@ interface StaffAuthState {
   unreadNotifications: number;
   loading: boolean;
   loginWithPin: (phone: string, pin: string, expectedRole?: string) => Promise<{ error?: string; staff?: StaffLite }>;
+  updateStaffName: (name: string) => void;
+  clockIn: () => Promise<{ error?: string }>;
   clockOut: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshAttendance: () => Promise<void>;
@@ -93,6 +96,18 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staff?.id, token]);
 
+  // Keep the session honest and the badge/birthday banner current while the app stays open
+  // (e.g. left open overnight: the birthday banner must roll over at midnight).
+  useEffect(() => {
+    if (!token) return;
+    const timer = setInterval(() => {
+      refreshNotificationsFor(token);
+      refreshBirthdaysFor(token);
+    }, 60000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   async function refreshAttendanceFor(tok: string) {
     const { data } = await supabase.rpc("staff_get_attendance", { p_token: tok });
     const open = (data as Attendance[] | null)?.find((a) => !a.clock_out) ?? null;
@@ -110,11 +125,31 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
 
   async function sendBirthdayWish(toStaffId: string) {
     if (!token) return;
-    await supabase.rpc("staff_send_birthday_wish", { p_token: token, p_to_staff_id: toStaffId });
+    // Mark as wished straight away (the server also refuses a second wish the same day).
+    setTodaysBirthdays((prev) => prev.map((b) => (b.id === toStaffId ? { ...b, already_wished: true } : b)));
+    const { error } = await supabase.rpc("staff_send_birthday_wish", { p_token: token, p_to_staff_id: toStaffId });
+    if (error) setTodaysBirthdays((prev) => prev.map((b) => (b.id === toStaffId ? { ...b, already_wished: false } : b)));
+  }
+
+
+  // The server session ran out (or an admin deactivated the account). Without this the
+  // portal stayed open showing empty lists while every action silently failed.
+  function endExpiredSession() {
+    localStorage.removeItem(STAFF_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    setStaff(null);
+    setToken(null);
+    setOpenAttendance(null);
+    setTodaysBirthdays([]);
+    setUnreadNotifications(0);
   }
 
   async function refreshNotificationsFor(tok: string) {
-    const { data } = await supabase.rpc("staff_get_notifications", { p_token: tok });
+    const { data, error } = await supabase.rpc("staff_get_notifications", { p_token: tok });
+    if (error && /invalid or expired/i.test(error.message)) {
+      endExpiredSession();
+      return;
+    }
     setUnreadNotifications(((data as { is_read: boolean }[]) ?? []).filter((n) => !n.is_read).length);
   }
 
@@ -178,6 +213,31 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  // After the profile name is saved, refresh the header/greeting straight away.
+  function updateStaffName(name: string) {
+    setStaff((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, name };
+      localStorage.setItem(STAFF_KEY, JSON.stringify(next));
+      return next;
+    });
+  }
+
+  // Re-check-in after a check-out (login clocks in automatically). Same rule as
+  // login: live location is mandatory.
+  async function clockIn(): Promise<{ error?: string }> {
+    if (!token) return { error: "Please sign in again." };
+    const { lat, lng } = await getGeolocation();
+    if (lat == null || lng == null) {
+      return { error: "Please turn on live location and tap Allow, then try again." };
+    }
+    const { data, error } = await supabase.rpc("staff_clock_in", { p_token: token, p_lat: lat, p_lng: lng });
+    if (error) return { error: error.message };
+    if (!data?.success && data?.error !== "Already clocked in.") return { error: data?.error || "Could not check in." };
+    await refreshAttendanceFor(token);
+    return {};
+  }
+
   async function clockOut() {
     if (!token) return;
     try {
@@ -217,6 +277,8 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         unreadNotifications,
         loading,
         loginWithPin,
+        updateStaffName,
+        clockIn,
         clockOut,
         signOut,
         refreshAttendance,

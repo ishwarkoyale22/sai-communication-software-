@@ -4,7 +4,7 @@ import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
 
 export function Profile() {
-  const { staff, token, signOut } = useStaffAuth();
+  const { staff, token, signOut, updateStaffName } = useStaffAuth();
   const [name, setName] = useState(staff?.name || "");
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileMsg, setProfileMsg] = useState("");
@@ -19,6 +19,7 @@ export function Profile() {
     setProfileMsg("");
     const { data, error } = await supabase.rpc("staff_update_profile", { p_token: token, p_name: name.trim() });
     setSavingProfile(false);
+    if (!error && data?.success) updateStaffName(name.trim());
     setProfileMsg(error ? error.message : data?.success ? "Saved." : "Failed to save.");
   }
 
