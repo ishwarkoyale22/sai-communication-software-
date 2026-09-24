@@ -1,5 +1,17 @@
 import { useEffect, useState } from "react";
-import { formatCurrency, formatDateTime, generateSimpleInvoicePdf, openRetailTaxInvoice, openBlankInvoiceWindow } from "@sai/shared";
+import {
+  formatCurrency,
+  formatDateTime,
+  generateSimpleInvoicePdf,
+  openRetailTaxInvoice,
+  openBlankInvoiceWindow,
+  GST_STATES,
+  isValidGstin,
+  normalizeGstin,
+  stateCodeOf,
+  stateLabel,
+  type RetailTaxInvoiceInput,
+} from "@sai/shared";
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
@@ -85,6 +97,12 @@ interface Sale {
   notes: string | null;
   created_at: string;
   gst_rate: number | null;
+  customer_gstin?: string | null;
+  customer_address?: string | null;
+  customer_state?: string | null;
+  invoice_date?: string | null;
+  amount_received?: number | null;
+  terms?: string | null;
 }
 interface CartLine {
   /** Unique per cart line — the inventory_id for a merged non-serialized line, or the specific unit_id for a serialized one (each physical unit is its own line). */
@@ -99,9 +117,21 @@ interface CartLine {
   unit_id: string | null;
   /** Original unit shape, kept so removeLine can restore it to the picker exactly (imei_1/imei_2 split intact). */
   unitSnapshot?: AvailableUnit;
+  /** Optional HSN/SAC printed on the invoice. */
+  hsn_sac: string;
+  /** GST % for this line; null = use the sale's GST rate. */
+  gst_rate: number | null;
 }
 
 const GST_RATE_OPTIONS = [0, 5, 12, 18, 28];
+
+/** Today as YYYY-MM-DD in the shop's local time (toISOString would give the UTC date). */
+function localDateStr(d = new Date()) {
+  return d.toLocaleDateString("en-CA");
+}
+
+/** Rupees with paise, for the invoice summary (bills are exact to the paisa). */
+const money2 = (n: number) => `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function nextInvoiceNumber() {
   const now = new Date();
@@ -124,6 +154,15 @@ export function Sales() {
   const [customerDob, setCustomerDob] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [gstRateChoice, setGstRateChoice] = useState<string>("18");
+  // Optional GST-invoice details — left blank they change nothing about how a sale worked before.
+  const [showMore, setShowMore] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(localDateStr());
+  const [customerGstin, setCustomerGstin] = useState("");
+  const [customerAddress, setCustomerAddress] = useState("");
+  const [customerStateCode, setCustomerStateCode] = useState("");
+  const [receivedText, setReceivedText] = useState<string | null>(null); // null = follows the payment method
+  const [terms, setTerms] = useState("Thanks for doing business with us!");
   const [gstRateCustom, setGstRateCustom] = useState<number>(18);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [gifts, setGifts] = useState<GiftItem[]>([]);
@@ -208,6 +247,8 @@ export function Sales() {
           serial_no: unitLabel(unit),
           unit_id: unit.id,
           unitSnapshot: unit,
+          hsn_sac: "",
+          gst_rate: null,
         },
       ]);
       setAvailableUnits((prev) => prev.filter((u) => u.id !== unit.id));
@@ -220,7 +261,7 @@ export function Sales() {
       if (existing) {
         return prev.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l));
       }
-      return [...prev, { key: item.id, inventory_id: item.id, item_name: `${item.name} ${item.model}`, quantity: 1, unit_price: item.price, serial_no: "", unit_id: null }];
+      return [...prev, { key: item.id, inventory_id: item.id, item_name: `${item.name} ${item.model}`, quantity: 1, unit_price: item.price, serial_no: "", unit_id: null, hsn_sac: "", gst_rate: null }];
     });
     // Clear the search box too, so the next item can be searched and added right away.
     setPickId("");
@@ -229,6 +270,10 @@ export function Sales() {
 
   function updateQty(key: string, qty: number) {
     setCart((prev) => prev.map((l) => (l.key === key ? { ...l, quantity: Math.max(1, qty) } : l)));
+  }
+
+  function updateLine(key: string, patch: Partial<CartLine>) {
+    setCart((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)));
   }
 
   function updateSerial(key: string, serial_no: string) {
@@ -336,8 +381,60 @@ export function Sales() {
   // invoice. This recomputes live on every render, so it always reflects
   // the current cart/gift lines and the currently selected rate.
   const gstRate = gstRateChoice === "custom" ? gstRateCustom : Number(gstRateChoice);
-  const taxableValue = gstRate > 0 ? cartTotal / (1 + gstRate / 100) : cartTotal;
+  // Each item line can carry its own GST %; gifts/hampers and lines left on "sale rate" use the sale's rate.
+  const splitTaxable = (amount: number, rate: number) => (rate > 0 ? amount / (1 + rate / 100) : amount);
+  const taxableValue =
+    cart.reduce((sum, l) => sum + splitTaxable(l.quantity * l.unit_price, l.gst_rate ?? gstRate), 0) +
+    splitTaxable(giftCart.reduce((sum, l) => sum + l.quantity * l.unit_price, 0) + hamperCart.reduce((sum, l) => sum + l.quantity * l.unit_price, 0), gstRate);
   const gstAmount = cartTotal - taxableValue;
+  const mixedRates = cart.some((l) => l.gst_rate != null && l.gst_rate !== gstRate);
+
+  // Same state as the shop -> CGST + SGST; a customer in another state -> IGST.
+  const shopStateCode = stateCodeOf(SHOP.state);
+  const gstinTrim = normalizeGstin(customerGstin);
+  const gstinOk = !gstinTrim || isValidGstin(gstinTrim);
+  const effectiveCustomerState = gstinTrim && gstinOk ? stateCodeOf(gstinTrim) : customerStateCode;
+  const interState = !!effectiveCustomerState && !!shopStateCode && effectiveCustomerState !== shopStateCode;
+
+  // Payment: by default what the method implies (everything now, or nothing for Credit); editable for part payments.
+  const receivedAuto = paymentMethod === "credit" ? 0 : cartTotal;
+  const received = receivedText === null ? receivedAuto : Number(receivedText) || 0;
+  const balanceDue = cartTotal - received;
+
+  /** The invoice exactly as it will print, from what is currently typed — used by "Preview invoice". */
+  function buildPreview(): RetailTaxInvoiceInput | null {
+    if (cart.length === 0 && giftCart.length === 0 && hamperCart.length === 0) {
+      setError("Add at least one item, gift or hamper.");
+      return null;
+    }
+    if (!customerName.trim()) {
+      setError("Customer name is required.");
+      return null;
+    }
+    setError(null);
+    return {
+      invoiceNumber: invoiceNumber.trim() || "(assigned on save)",
+      createdAt: new Date().toISOString(),
+      invoiceDate,
+      customerName: customerName.trim(),
+      customerPhone: customerPhone.trim() || null,
+      customerAddress: customerAddress.trim() || null,
+      customerGstin: gstinTrim || null,
+      customerState: effectiveCustomerState ? stateLabel(effectiveCustomerState) : null,
+      paymentMethod: paymentMethod.startsWith("finance:") ? "emi" : paymentMethod,
+      receivedAmount: received,
+      items: [
+        ...cart.map((l) => ({ name: l.item_name, serialNo: l.serial_no.trim() || null, hsnSac: l.hsn_sac.trim() || null, quantity: l.quantity, totalPrice: l.quantity * l.unit_price, gstRate: l.gst_rate })),
+        ...giftCart.map((l) => ({ name: l.name, quantity: l.quantity, totalPrice: l.quantity * l.unit_price })),
+        ...hamperCart.map((l) => ({ name: l.name, quantity: l.quantity, totalPrice: l.quantity * l.unit_price })),
+      ],
+      totalAmount: cartTotal,
+      gstRatePercent: gstRate,
+      terms: terms.trim() || null,
+      shop: SHOP,
+      mode: "view",
+    };
+  }
 
   async function createSale() {
     if (cart.length === 0 && giftCart.length === 0 && hamperCart.length === 0) {
@@ -347,6 +444,24 @@ export function Sales() {
     if (!customerName.trim()) {
       setError("Customer name is required.");
       return;
+    }
+    if (!gstinOk) {
+      setError("Customer GSTIN isn't valid — it should be 15 characters like 27AAAAA0000A1Z5. Clear it if they don't have one.");
+      return;
+    }
+    if (received < -0.005 || received > cartTotal + 0.005) {
+      setError(`Amount received must be between ₹0 and the invoice total (${formatCurrency(cartTotal)}).`);
+      return;
+    }
+    if (invoiceDate > localDateStr()) {
+      setError("Invoice date can't be in the future.");
+      return;
+    }
+    for (const l of cart) {
+      if (!(l.unit_price >= 0)) {
+        setError(`"${l.item_name}": price can't be negative.`);
+        return;
+      }
     }
 
     setSaving(true);
@@ -423,10 +538,16 @@ export function Sales() {
       }
 
       const isFinance = paymentMethod.startsWith("finance:");
+      const manualInvoiceNo = invoiceNumber.trim();
+      if (manualInvoiceNo) {
+        const { data: clash } = await supabase.from("sales").select("id").eq("invoice_number", manualInvoiceNo).maybeSingle();
+        if (clash) throw new Error(`Invoice number "${manualInvoiceNo}" is already used by another sale.`);
+      }
+      const paymentStatus = received >= cartTotal - 0.005 ? "paid" : received > 0.005 ? "partial" : "pending";
       const { data: sale, error: saleErr } = await supabase
         .from("sales")
         .insert({
-          invoice_number: nextInvoiceNumber(),
+          invoice_number: manualInvoiceNo || nextInvoiceNumber(),
           customer_id: finalCustomerId,
           customer_name: customerName.trim(),
           customer_phone: trimmedPhone || null,
@@ -436,9 +557,15 @@ export function Sales() {
           final_amount: cartTotal,
           payment_method: isFinance ? "emi" : paymentMethod,
           finance_partner_id: isFinance ? paymentMethod.slice("finance:".length) : null,
-          payment_status: "paid",
+          payment_status: paymentStatus,
           staff_id: staffId || null,
           gst_rate: gstRate,
+          customer_gstin: gstinTrim || null,
+          customer_address: customerAddress.trim() || null,
+          customer_state: effectiveCustomerState ? stateLabel(effectiveCustomerState) : null,
+          invoice_date: invoiceDate || null,
+          amount_received: received,
+          terms: terms.trim() || null,
         })
         .select()
         .single();
@@ -505,6 +632,8 @@ export function Sales() {
             unit_price: l.unit_price,
             total_price: l.quantity * l.unit_price,
             serial_no: l.serial_no.trim() || null,
+            hsn_sac: l.hsn_sac.trim() || null,
+            gst_rate: l.gst_rate,
           }))
         );
         if (itemsErr) throw itemsErr;
@@ -594,6 +723,14 @@ export function Sales() {
       setCustomerDob("");
       setStaffId("");
       setGstRateChoice("18");
+      setShowMore(false);
+      setInvoiceNumber("");
+      setInvoiceDate(localDateStr());
+      setCustomerGstin("");
+      setCustomerAddress("");
+      setCustomerStateCode("");
+      setReceivedText(null);
+      setTerms("Thanks for doing business with us!");
       setGstRateCustom(18);
       setShowForm(false);
       await load();
@@ -667,24 +804,31 @@ export function Sales() {
       // elsewhere in this repo), so it's deliberately left out of this select.
       const { data: items, error: itemsErr } = await supabase
         .from("sales_items")
-        .select("item_name, quantity, total_price, serial_no")
+        .select("item_name, quantity, total_price, serial_no, hsn_sac, gst_rate")
         .eq("sale_id", sale.id);
       if (itemsErr) throw itemsErr;
       openRetailTaxInvoice({
         invoiceNumber: sale.invoice_number,
         createdAt: sale.created_at,
         customerName: sale.customer_name,
+        invoiceDate: sale.invoice_date ?? null,
         customerPhone: sale.customer_phone,
+        customerAddress: sale.customer_address ?? null,
+        customerGstin: sale.customer_gstin ?? null,
+        customerState: sale.customer_state ?? null,
         paymentMethod: sale.payment_method,
-        receivedAmount: sale.payment_status === "paid" ? sale.final_amount : undefined,
+        receivedAmount: sale.amount_received ?? (sale.payment_status === "paid" ? sale.final_amount : undefined),
         items: (items ?? []).map((i: any) => ({
           name: i.item_name,
           quantity: i.quantity,
           totalPrice: i.total_price,
           serialNo: i.serial_no ?? null,
+          hsnSac: i.hsn_sac ?? null,
+          gstRate: i.gst_rate ?? null,
         })),
         totalAmount: sale.final_amount,
         gstRatePercent: sale.gst_rate ?? 18,
+        terms: sale.terms ?? null,
         shop: SHOP,
         mode,
       }, win);
@@ -753,7 +897,7 @@ export function Sales() {
                 </td>
                 <td className="text-right">{formatCurrency(s.final_amount)}</td>
                 <td className="text-gray-500 capitalize">{s.payment_method} · {s.payment_status}</td>
-                <td className="text-gray-500">{formatDateTime(s.created_at)}</td>
+                <td className="text-gray-500">{s.invoice_date ? new Date(s.invoice_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : formatDateTime(s.created_at)}</td>
                 <td className="text-right">
                   <div className="flex items-center justify-end gap-1">
                     <button
@@ -797,7 +941,7 @@ export function Sales() {
 
       {showForm && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4">
-          <div className="card w-full max-w-lg p-5 space-y-3">
+          <div className="card max-h-[92vh] w-full max-w-lg space-y-3 overflow-y-auto p-5">
             <div className="flex items-center justify-between border-b border-border pb-2">
               <h2 className="text-sm font-semibold text-gray-800">New Sale</h2>
               <button onClick={() => setShowForm(false)}><X size={16} /></button>
@@ -834,6 +978,43 @@ export function Sales() {
                 <option key={s.id} value={s.id}>{s.name}</option>
               ))}
             </select>
+
+            <button type="button" className="text-xs font-medium text-brand-primary" onClick={() => setShowMore((v) => !v)}>
+              {showMore ? "▾ Hide" : "▸ Add"} GST invoice details (invoice no., date, customer GSTIN / address / state)
+            </button>
+            {showMore && (
+              <div className="grid grid-cols-2 gap-2 rounded-md border border-border p-2">
+                <input className="input" placeholder="Invoice no. (blank = automatic)" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+                <label className="text-[11px] text-gray-500">
+                  Invoice date
+                  <input type="date" className="input mt-0.5" max={localDateStr()} value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                </label>
+                <div>
+                  <input
+                    className={`input ${customerGstin && !gstinOk ? "!border-red-400" : ""}`}
+                    placeholder="Customer GSTIN (optional)"
+                    maxLength={15}
+                    value={customerGstin}
+                    onChange={(e) => setCustomerGstin(e.target.value.toUpperCase())}
+                  />
+                  {customerGstin && !gstinOk && <div className="mt-0.5 text-[10px] text-brand-danger">Not a valid GSTIN yet</div>}
+                </div>
+                <select
+                  className="input"
+                  value={effectiveCustomerState}
+                  disabled={!!gstinTrim && gstinOk}
+                  onChange={(e) => setCustomerStateCode(e.target.value)}
+                  title={gstinTrim && gstinOk ? "Taken from the GSTIN" : "Customer's state — another state means IGST instead of CGST + SGST"}
+                >
+                  <option value="">Customer's state (optional)</option>
+                  {GST_STATES.map((st) => (
+                    <option key={st.code} value={st.code}>{st.code}-{st.name}</option>
+                  ))}
+                </select>
+                <textarea className="input col-span-2" rows={2} placeholder="Customer address (optional)" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} />
+                <textarea className="input col-span-2" rows={2} placeholder="Terms & conditions (printed on the invoice)" value={terms} onChange={(e) => setTerms(e.target.value)} />
+              </div>
+            )}
 
             <div className="flex gap-2">
               <div className="relative flex-1">
@@ -918,6 +1099,34 @@ export function Sales() {
                       onChange={(e) => updateSerial(l.key, e.target.value)}
                     />
                   )}
+                  <div className="mt-1.5 grid grid-cols-3 gap-1.5">
+                    <input
+                      className="input !py-0.5 text-xs"
+                      placeholder="HSN / SAC"
+                      value={l.hsn_sac}
+                      onChange={(e) => updateLine(l.key, { hsn_sac: e.target.value })}
+                    />
+                    <select
+                      className="input !py-0.5 text-xs"
+                      value={l.gst_rate ?? ""}
+                      onChange={(e) => updateLine(l.key, { gst_rate: e.target.value === "" ? null : Number(e.target.value) })}
+                      title="GST % for this item"
+                    >
+                      <option value="">GST: sale rate ({gstRate}%)</option>
+                      {GST_RATE_OPTIONS.map((r) => (
+                        <option key={r} value={r}>GST {r}%</option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className="input !py-0.5 text-right text-xs"
+                      title="Price per unit, including GST"
+                      value={l.unit_price}
+                      onChange={(e) => updateLine(l.key, { unit_price: Number(e.target.value) })}
+                    />
+                  </div>
                 </div>
               ))}
               {cart.length === 0 && <p className="text-sm text-gray-400">No items added yet.</p>}
@@ -1016,15 +1225,26 @@ export function Sales() {
             <div className="space-y-1 rounded-md bg-page p-2.5 text-sm">
               <div className="flex justify-between text-gray-500">
                 <span>Taxable Value</span>
-                <span>{formatCurrency(taxableValue)}</span>
+                <span>{money2(taxableValue)}</span>
               </div>
               <div className="flex justify-between text-gray-500">
-                <span>GST ({gstRate}%)</span>
-                <span>{formatCurrency(gstAmount)}</span>
+                <span>GST {mixedRates ? "(mixed rates)" : `(${gstRate}%)`}</span>
+                <span>{money2(gstAmount)}</span>
               </div>
+              {interState ? (
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>IGST (customer is in another state)</span>
+                  <span>{money2(gstAmount)}</span>
+                </div>
+              ) : (
+                <div className="flex justify-between text-xs text-gray-400">
+                  <span>CGST + SGST</span>
+                  <span>{money2(gstAmount / 2)} + {money2(gstAmount / 2)}</span>
+                </div>
+              )}
               <div className="flex justify-between border-t border-border pt-1 font-semibold text-gray-800">
                 <span>Invoice Total</span>
-                <span>{formatCurrency(cartTotal)}</span>
+                <span>{money2(cartTotal)}</span>
               </div>
             </div>
 
@@ -1034,15 +1254,48 @@ export function Sales() {
                 <option value="card">Card</option>
                 <option value="upi">UPI</option>
                 <option value="bank_transfer">Bank Transfer</option>
+                <option value="credit">Credit (pay later)</option>
                 {financePartners.map((p) => (
                   <option key={p.id} value={`finance:${p.id}`}>{p.name}</option>
                 ))}
               </select>
               <span className="text-lg font-bold text-brand-primary">{formatCurrency(cartTotal)}</span>
             </div>
+            <div className="grid grid-cols-2 items-end gap-2">
+              <label className="text-[11px] text-gray-500">
+                Amount received now
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  className="input mt-0.5"
+                  value={receivedText === null ? String(receivedAuto || "") : receivedText}
+                  onChange={(e) => setReceivedText(e.target.value)}
+                />
+              </label>
+              <div className={`pb-1.5 text-right text-sm font-medium ${balanceDue > 0.005 ? "text-brand-danger" : "text-brand-success"}`}>
+                Balance: {money2(Math.max(0, balanceDue))}
+              </div>
+            </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button className="btn-ghost" onClick={() => setShowForm(false)} disabled={saving}>Cancel</button>
+              <button
+                className="btn-secondary"
+                disabled={saving}
+                onClick={() => {
+                  // Open the tab first (still inside the click) so the popup isn't blocked.
+                  const win = openBlankInvoiceWindow();
+                  const input = buildPreview();
+                  if (!input) {
+                    win?.close();
+                    return;
+                  }
+                  openRetailTaxInvoice(input, win);
+                }}
+              >
+                Preview invoice
+              </button>
               <button className="btn-primary" onClick={createSale} disabled={saving}>
                 {saving ? "Saving..." : "Complete Sale"}
               </button>

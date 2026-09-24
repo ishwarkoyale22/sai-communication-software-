@@ -12,17 +12,23 @@
  * later still shows the same figures.
  */
 
+import { stateCodeOf, taxSummary } from "./purchaseLines";
+
 export interface RetailTaxInvoiceItem {
   name: string;
   serialNo?: string | null;
   hsnSac?: string | null;
   quantity: number;
   totalPrice: number; // GST-inclusive line amount
+  /** GST % for THIS line. When omitted the invoice-wide `gstRatePercent` applies (how every invoice worked before). */
+  gstRate?: number | null;
 }
 
 export interface RetailTaxInvoiceInput {
   invoiceNumber: string;
   createdAt: string;
+  /** Date printed on the invoice when it differs from when it was entered (e.g. a paper bill from earlier). */
+  invoiceDate?: string | null;
   customerName: string;
   customerPhone?: string | null;
   customerAddress?: string | null;
@@ -35,6 +41,8 @@ export interface RetailTaxInvoiceInput {
   totalAmount: number; // GST-inclusive grand total (pre-rounding)
   /** GST %, e.g. 18 for 18% (9% CGST + 9% SGST split). Defaults to 18 — the rate this invoice always used before it became selectable per sale. */
   gstRatePercent?: number;
+  /** Printed under "Terms & Conditions". */
+  terms?: string | null;
   shop: {
     name: string;
     address: string;
@@ -79,6 +87,14 @@ function numberToWords(num: number): string {
   return words.trim() + " Rupees only";
 }
 
+function esc(v: unknown): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function fmt(n: number): string {
   return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -106,28 +122,35 @@ export function openBlankInvoiceWindow(): Window | null {
 export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?: Window | null): void {
   const { shop } = input;
   const gstRatePercent = input.gstRatePercent ?? DEFAULT_GST_RATE_PERCENT;
-  const GST_RATE = gstRatePercent / 100;
-  const halfRatePercent = gstRatePercent / 2;
+
+  // Same state -> CGST + SGST (half each); a customer in another state -> IGST.
+  const posCode = stateCodeOf(shop.state);
+  const custCode = stateCodeOf(input.customerState) || stateCodeOf(input.customerGstin);
+  const interState = !!custCode && !!posCode && custCode !== posCode;
 
   // ── Line item rows ──────────────────────────────────────────────────────────
-  const itemRows = input.items.map((item, i) => {
-    const taxable = item.totalPrice / (1 + GST_RATE);
+  const lines = input.items.map((item) => {
+    const rate = item.gstRate != null ? item.gstRate : gstRatePercent;
+    const taxable = item.totalPrice / (1 + rate / 100);
     const tax = item.totalPrice - taxable;
-    const unitPrice = taxable / item.quantity;
-    const serialLine = item.serialNo
-      ? `<div class="item-imei">Serial No.: ${item.serialNo}</div>`
+    return { item, rate, taxable, tax, unit: item.quantity > 0 ? taxable / item.quantity : taxable };
+  });
+
+  const itemRows = lines.map((l, i) => {
+    const serialLine = l.item.serialNo
+      ? `<div class="item-imei">Serial No.: ${esc(l.item.serialNo)}</div>`
       : "";
     return `<tr>
       <td class="text-center">${i + 1}</td>
       <td>
-        <div class="item-desc">${item.name}</div>
+        <div class="item-desc">${esc(l.item.name)}</div>
         ${serialLine}
       </td>
-      <td class="text-center">${item.hsnSac ?? ""}</td>
-      <td class="text-center">${item.quantity}</td>
-      <td class="text-right">₹ ${fmt(unitPrice)}</td>
-      <td class="text-right">₹ ${fmt(tax)} (${Math.round(GST_RATE * 100)}%)</td>
-      <td class="text-right font-bold">₹ ${fmt(item.totalPrice)}</td>
+      <td class="text-center">${esc(l.item.hsnSac ?? "")}</td>
+      <td class="text-center">${l.item.quantity}</td>
+      <td class="text-right">₹ ${fmt(l.unit)}</td>
+      <td class="text-right">₹ ${fmt(l.tax)} (${l.rate}%)</td>
+      <td class="text-right font-bold">₹ ${fmt(l.item.totalPrice)}</td>
     </tr>`;
   }).join("");
 
@@ -135,11 +158,11 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
   const rawTotal = input.totalAmount;
   const roundedTotal = Math.round(rawTotal);
   const roundOff = roundedTotal - rawTotal;
-  const roundOffStr = roundOff < 0
-    ? `- ₹ ${fmt(Math.abs(roundOff))}`
-    : roundOff > 0
-      ? `+ ₹ ${fmt(roundOff)}`
-      : "₹ 0.00";
+  const roundOffStr = Math.abs(roundOff) < 0.005
+    ? "₹ 0.00"
+    : roundOff < 0
+      ? `- ₹ ${fmt(Math.abs(roundOff))}`
+      : `+ ₹ ${fmt(roundOff)}`;
 
   // Default to nothing received when the caller doesn't specify an amount —
   // assuming full payment by default would misstate the balance owed on any
@@ -147,49 +170,72 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
   const received = input.receivedAmount ?? 0;
   const balance = roundedTotal - received;
 
-  // ── Tax summary: group by HSN/SAC ───────────────────────────────────────────
-  const hsnGroups = new Map<string, { taxable: number; tax: number }>();
-  for (const item of input.items) {
-    const key = item.hsnSac?.trim() ?? "";
-    const taxable = item.totalPrice / (1 + GST_RATE);
-    const tax = item.totalPrice - taxable;
-    const g = hsnGroups.get(key);
-    if (g) { g.taxable += taxable; g.tax += tax; }
-    else hsnGroups.set(key, { taxable, tax });
-  }
-
-  const taxRows = Array.from(hsnGroups.entries()).map(([hsn, g]) => {
-    const half = g.tax / 2;
-    return `<tr>
-      <td>${hsn}</td>
+  // ── Tax summary: group by HSN/SAC + rate ────────────────────────────────────
+  const summary = taxSummary(lines.map((l) => ({ hsn: l.item.hsnSac ?? "", rate: l.rate, taxable: l.taxable, tax: l.tax })));
+  const taxRows = summary.rows.map((g) => interState
+    ? `<tr>
+      <td>${esc(g.hsn)}</td>
       <td class="text-right">${fmt(g.taxable)}</td>
-      <td>${halfRatePercent}</td>
-      <td class="text-right">${fmt(half)}</td>
-      <td>${halfRatePercent}</td>
-      <td class="text-right">${fmt(half)}</td>
+      <td>${g.rate}</td>
       <td class="text-right">${fmt(g.tax)}</td>
-    </tr>`;
-  }).join("");
+      <td class="text-right">${fmt(g.tax)}</td>
+    </tr>`
+    : `<tr>
+      <td>${esc(g.hsn)}</td>
+      <td class="text-right">${fmt(g.taxable)}</td>
+      <td>${g.rate / 2}</td>
+      <td class="text-right">${fmt(g.cgst)}</td>
+      <td>${g.rate / 2}</td>
+      <td class="text-right">${fmt(g.sgst)}</td>
+      <td class="text-right">${fmt(g.tax)}</td>
+    </tr>`).join("");
 
-  const totalTaxable = rawTotal / (1 + GST_RATE);
-  const totalTax = rawTotal - totalTaxable;
-  const totalHalf = totalTax / 2;
+  const totalTaxable = summary.taxable;
+  const totalTax = summary.tax;
+  const taxHeader = interState
+    ? `<tr>
+              <th rowspan="2" style="width:22%;">HSN/ SAC</th>
+              <th rowspan="2" style="width:28%;">Taxable<br>amount (₹)</th>
+              <th colspan="2" style="width:30%;">IGST</th>
+              <th rowspan="2" style="width:20%;">Total Tax<br>(₹)</th>
+            </tr>
+            <tr>
+              <th>Rate (%)</th>
+              <th>Amt (₹)</th>
+            </tr>`
+    : `<tr>
+              <th rowspan="2" style="width:17%;">HSN/ SAC</th>
+              <th rowspan="2" style="width:21%;">Taxable<br>amount (₹)</th>
+              <th colspan="2" style="width:21%;">CGST</th>
+              <th colspan="2" style="width:21%;">SGST</th>
+              <th rowspan="2" style="width:20%;">Total Tax<br>(₹)</th>
+            </tr>
+            <tr>
+              <th>Rate (%)</th>
+              <th>Amt (₹)</th>
+              <th>Rate (%)</th>
+              <th>Amt (₹)</th>
+            </tr>`;
+  const taxTotalRow = interState
+    ? `<tr class="font-bold"><td>TOTAL</td><td class="text-right">${fmt(totalTaxable)}</td><td></td><td class="text-right">${fmt(totalTax)}</td><td class="text-right">${fmt(totalTax)}</td></tr>`
+    : `<tr class="font-bold"><td>TOTAL</td><td class="text-right">${fmt(totalTaxable)}</td><td></td><td class="text-right">${fmt(summary.cgst)}</td><td></td><td class="text-right">${fmt(summary.sgst)}</td><td class="text-right">${fmt(totalTax)}</td></tr>`;
+  const termsHtml = esc(input.terms?.trim() || "Thanks for doing business with us!").replace(/\n/g, "<br>");
 
   // ── Bill To section ──────────────────────────────────────────────────────────
   const billToLines = [
-    input.customerAddress ? `<div>${input.customerAddress}</div>` : "",
-    input.customerPhone ? `<div style="margin-top:3px;"><strong>Contact No:</strong> ${input.customerPhone}${input.customerGstin ? ` &nbsp;&nbsp; <strong>GSTIN:</strong> ${input.customerGstin}` : ""}</div>` : "",
-    input.customerState ? `<div><strong>State:</strong> ${input.customerState}</div>` : "",
+    input.customerAddress ? `<div style="white-space:pre-line;">${esc(input.customerAddress)}</div>` : "",
+    input.customerPhone ? `<div style="margin-top:3px;"><strong>Contact No:</strong> ${esc(input.customerPhone)}${input.customerGstin ? ` &nbsp;&nbsp; <strong>GSTIN:</strong> ${esc(input.customerGstin)}` : ""}</div>` : (input.customerGstin ? `<div style="margin-top:3px;"><strong>GSTIN:</strong> ${esc(input.customerGstin)}</div>` : ""),
+    input.customerState ? `<div><strong>State:</strong> ${esc(input.customerState)}</div>` : "",
   ].join("");
 
-  const paymentLabel = input.paymentMethod.charAt(0).toUpperCase() + input.paymentMethod.slice(1).replace(/_/g, " ");
+  const paymentLabel = esc(input.paymentMethod.charAt(0).toUpperCase() + input.paymentMethod.slice(1).replace(/_/g, " "));
 
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="format-detection" content="telephone=no, email=no, address=no, date=no">
-  <title>Tax Invoice - ${shop.name}</title>
+  <title>Tax Invoice - ${esc(shop.name)}</title>
   <style>
     @page { size: A4 portrait; margin: 8mm; }
     * {
@@ -304,10 +350,10 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
     <!-- Brand Header -->
     <div class="brand-section">
       <div class="brand-logo">
-        <img src="${window.location.origin}/logo.png" alt="${shop.name}" />
+        <img src="${window.location.origin}/logo.png" alt="${esc(shop.name)}" />
       </div>
       <div class="brand-details">
-        <h1>${shop.name.toUpperCase()}</h1>
+        <h1>${esc(shop.name.toUpperCase())}</h1>
         <div class="brand-address">${shop.address}</div>
         <div class="brand-grid">
           <div><strong>Phone:</strong> ${shop.phone}</div>
@@ -323,7 +369,7 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
       <div class="bill-to-col">
         <div class="section-header-bar">Bill To:</div>
         <div class="bill-to-content">
-          <div class="bill-to-title">${input.customerName}</div>
+          <div class="bill-to-title">${esc(input.customerName)}</div>
           ${billToLines}
         </div>
       </div>
@@ -331,9 +377,9 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
         <div class="section-header-bar">Invoice Details:</div>
         <div class="meta-content-grid">
           <div>Invoice No.:</div>
-          <div class="font-bold">${input.invoiceNumber}</div>
+          <div class="font-bold">${esc(input.invoiceNumber)}</div>
           <div>Date:</div>
-          <div class="font-bold">${fmtDate(input.createdAt)}</div>
+          <div class="font-bold">${fmtDate(input.invoiceDate || input.createdAt)}</div>
           <div>Place Of Supply:</div>
           <div class="font-bold">${shop.state ?? ""}</div>
         </div>
@@ -373,31 +419,11 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
       <div class="middle-left">
         <table class="tax-sub-table">
           <thead>
-            <tr>
-              <th rowspan="2" style="width:17%;">HSN/ SAC</th>
-              <th rowspan="2" style="width:21%;">Taxable<br>amount (₹)</th>
-              <th colspan="2" style="width:21%;">CGST</th>
-              <th colspan="2" style="width:21%;">SGST</th>
-              <th rowspan="2" style="width:20%;">Total Tax<br>(₹)</th>
-            </tr>
-            <tr>
-              <th>Rate (%)</th>
-              <th>Amt (₹)</th>
-              <th>Rate (%)</th>
-              <th>Amt (₹)</th>
-            </tr>
+            ${taxHeader}
           </thead>
           <tbody>
             ${taxRows}
-            <tr class="font-bold">
-              <td>TOTAL</td>
-              <td class="text-right">${fmt(totalTaxable)}</td>
-              <td></td>
-              <td class="text-right">${fmt(totalHalf)}</td>
-              <td></td>
-              <td class="text-right">${fmt(totalHalf)}</td>
-              <td class="text-right">${fmt(totalTax)}</td>
-            </tr>
+            ${taxTotalRow}
           </tbody>
         </table>
 
@@ -450,10 +476,10 @@ export function openRetailTaxInvoice(input: RetailTaxInvoiceInput, targetWindow?
     <div class="footer-block">
       <div class="footer-left">
         <div class="terms-heading">Terms &amp; Conditions:</div>
-        <div class="terms-content">Thanks for doing business with us!</div>
+        <div class="terms-content">${termsHtml}</div>
       </div>
       <div class="footer-right">
-        <div class="signatory-company">For ${shop.name.toUpperCase()}:</div>
+        <div class="signatory-company">For ${esc(shop.name.toUpperCase())}:</div>
         <div class="signatory-box-inner">Authorized Signatory</div>
       </div>
     </div>
