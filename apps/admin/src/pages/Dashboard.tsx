@@ -21,6 +21,12 @@ interface SaleItemRow {
   quantity: number;
   total_price: number;
 }
+interface BundleLine {
+  sale_id: string;
+  quantity: number;
+  unit_price: number | null;
+  unit_cost: number | null;
+}
 interface InventoryRow {
   id: string;
   name: string;
@@ -102,6 +108,7 @@ export function Dashboard() {
   const [sales, setSales] = useState<SaleRow[]>([]);
   const [saleItems, setSaleItems] = useState<SaleItemRow[]>([]);
   const [inventory, setInventory] = useState<InventoryRow[]>([]);
+  const [bundleLines, setBundleLines] = useState<BundleLine[]>([]);
   const [financeTransactions, setFinanceTransactions] = useState<FinanceRow[]>([]);
   const [pendingRepairEnquiries, setPendingRepairEnquiries] = useState(0);
   const [pendingWebsiteOrders, setPendingWebsiteOrders] = useState(0);
@@ -153,6 +160,8 @@ export function Dashboard() {
       { data: repairRows },
       { data: staffRows },
       { data: targetRows },
+      { data: hamperRows },
+      { data: giftRows },
     ] = await Promise.all([
       supabase.from("sales").select("id, final_amount, payment_method, staff_id, created_at").gte("created_at", yearAgo.toISOString()),
       supabase.from("sales_items").select("sale_id, inventory_id, item_name, quantity, total_price"),
@@ -164,7 +173,10 @@ export function Dashboard() {
       supabase.from("repairs").select("id, status, technician_id, received_at, completed_at"),
       supabase.from("staff").select("id, name").eq("is_active", true),
       supabase.from("sales_targets").select("period, target_amount"),
+      supabase.from("hamper_sales").select("sale_id, quantity, unit_price, unit_cost"),
+      supabase.from("gift_sales").select("sale_id, quantity, unit_price, unit_cost"),
     ]);
+    setBundleLines([...((hamperRows as BundleLine[]) ?? []), ...((giftRows as BundleLine[]) ?? [])]);
 
     setSales((allSales as SaleRow[]) ?? []);
     setSaleItems((items as SaleItemRow[]) ?? []);
@@ -211,8 +223,13 @@ export function Dashboard() {
       if (!inv || inv.cost_price == null) continue; // no cost recorded — excluded, not assumed zero
       profit += item.total_price - inv.cost_price * item.quantity;
     }
+    // Gift hampers and gifts aren't inventory lines — their profit is price minus the cost recorded at sale time.
+    for (const b of bundleLines) {
+      if (!periodSaleIds.has(b.sale_id)) continue;
+      profit += (Number(b.unit_price ?? 0) - Number(b.unit_cost ?? 0)) * b.quantity;
+    }
     return profit;
-  }, [periodItems, inventoryById]);
+  }, [periodItems, inventoryById, bundleLines, periodSaleIds]);
 
   // finance_date is a plain `date` column (no time component) — compare as
   // a date-only string against the period boundary rather than mixing it

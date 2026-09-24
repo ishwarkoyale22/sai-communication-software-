@@ -43,9 +43,14 @@ export function FinanceReports() {
     return staff.find((s) => s.id === id)?.name ?? "Unknown";
   }
 
-  function fileUrlFor(path: string | null) {
-    if (!path) return null;
-    return supabase.storage.from("finance-reports").getPublicUrl(path).data.publicUrl;
+  // The bucket is private: open the file through a short-lived signed link.
+  async function openFile(path: string) {
+    const { data, error } = await supabase.storage.from("finance-reports").createSignedUrl(path, 300);
+    if (error || !data?.signedUrl) {
+      window.alert(error?.message || "Could not open the file.");
+      return;
+    }
+    window.open(data.signedUrl, "_blank", "noopener");
   }
 
   return (
@@ -77,7 +82,6 @@ export function FinanceReports() {
           </thead>
           <tbody>
             {reports.map((r) => {
-              const url = fileUrlFor(r.file_url);
               return (
                 <tr key={r.id}>
                   <td className="font-medium">
@@ -87,10 +91,10 @@ export function FinanceReports() {
                   <td className="text-gray-500">{formatDateTime(r.created_at)}</td>
                   <td className="max-w-xs truncate text-gray-500">{r.notes ?? "-"}</td>
                   <td className="text-right">
-                    {url ? (
-                      <a href={url} target="_blank" rel="noreferrer" className="btn-secondary inline-flex !px-2 !py-1 text-xs">
+                    {r.file_url ? (
+                      <button type="button" onClick={() => openFile(r.file_url!)} className="btn-secondary inline-flex !px-2 !py-1 text-xs">
                         <Download size={13} /> View / Download
-                      </a>
+                      </button>
                     ) : (
                       <span className="text-xs text-gray-400">No file</span>
                     )}

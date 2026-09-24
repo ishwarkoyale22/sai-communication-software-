@@ -218,9 +218,12 @@ export function Finance() {
     setError(null);
     try {
       const userId = await currentUserId();
-      const { data: created, error: insErr } = await supabase
-        .from("finance_transactions")
-        .insert({
+      // An EMI sale already creates a draft finance record automatically — complete that one
+      // instead of adding a duplicate for the same sale.
+      const { data: autoDraft } = form.sale_id
+        ? await supabase.from("finance_transactions").select("id").eq("sale_id", form.sale_id).eq("status", "draft").limit(1).maybeSingle()
+        : { data: null };
+      const payload = {
           customer_id: form.customer_id || null,
           sale_id: form.sale_id || null,
           stock_unit_id: form.stock_unit_id || null,
@@ -246,9 +249,10 @@ export function Finance() {
           status: "draft",
           created_by: userId,
           updated_by: userId,
-        })
-        .select()
-        .single();
+        };
+      const { data: created, error: insErr } = autoDraft
+        ? await supabase.from("finance_transactions").update(payload).eq("id", autoDraft.id).select().single()
+        : await supabase.from("finance_transactions").insert(payload).select().single();
       if (insErr) throw insErr;
 
       await supabase.from("finance_status_history").insert({

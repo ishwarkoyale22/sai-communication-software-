@@ -39,7 +39,7 @@ interface StaffAuthState {
   loading: boolean;
   loginWithPin: (phone: string, pin: string, expectedRole?: string) => Promise<{ error?: string; staff?: StaffLite }>;
   clockOut: () => Promise<void>;
-  signOut: () => void;
+  signOut: () => Promise<void>;
   refreshAttendance: () => Promise<void>;
   sendBirthdayWish: (toStaffId: string) => Promise<void>;
   refreshNotifications: () => Promise<void>;
@@ -189,7 +189,15 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     setOpenAttendance(null);
   }
 
-  function signOut() {
+  async function signOut() {
+    // Close today's attendance first so logging out also clocks the person out
+    // (best effort, capped so a slow location prompt can't block the logout).
+    if (token && openAttendance) {
+      await Promise.race([
+        supabase.rpc("staff_clock_out", { p_token: token }).then(() => undefined, () => undefined),
+        new Promise((resolve) => setTimeout(resolve, 4000)),
+      ]);
+    }
     localStorage.removeItem(STAFF_KEY);
     localStorage.removeItem(TOKEN_KEY);
     setStaff(null);

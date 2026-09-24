@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 import { useStaffAuth } from "../context/StaffAuthContext";
-import { Upload, FileText, Download } from "lucide-react";
+import { Upload, FileText } from "lucide-react";
 
 interface ReportRow {
   id: string;
@@ -30,11 +30,6 @@ export function FinanceReports() {
     if (!token) return;
     const { data } = await supabase.rpc("staff_get_finance_reports", { p_token: token });
     setReports((data as ReportRow[]) ?? []);
-  }
-
-  function fileUrlFor(path: string | null) {
-    if (!path) return null;
-    return supabase.storage.from("finance-reports").getPublicUrl(path).data.publicUrl;
   }
 
   async function submit() {
@@ -98,8 +93,7 @@ export function FinanceReports() {
       <div className="space-y-2">
         <div className="text-xs font-semibold uppercase text-gray-400">Your reports</div>
         {reports.map((r) => {
-          const url = fileUrlFor(r.file_url);
-          return (
+                    return (
             <div key={r.id} className="card space-y-1.5 p-3">
               <div className="flex items-start gap-2">
                 <FileText size={16} className="mt-0.5 shrink-0 text-brand-primary" />
@@ -109,11 +103,7 @@ export function FinanceReports() {
                 </div>
               </div>
               {r.notes && <div className="text-xs text-gray-500">{r.notes}</div>}
-              {url && (
-                <a href={url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs font-medium text-brand-primary">
-                  <Download size={12} /> View / Download
-                </a>
-              )}
+              {r.file_url && <div className="text-xs text-gray-400">File attached — the admin can open it.</div>}
             </div>
           );
         })}

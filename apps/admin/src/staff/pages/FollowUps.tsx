@@ -86,6 +86,23 @@ export function FollowUps() {
     load();
   }
 
+  // Reschedule keeps the follow-up open on a new date (marking it "rescheduled" would drop it from every tab).
+  async function reschedule(f: FollowUp) {
+    if (!token) return;
+    const next = window.prompt("New follow-up date (YYYY-MM-DD)", f.follow_up_date);
+    if (!next) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(next)) {
+      window.alert("Please enter the date as YYYY-MM-DD.");
+      return;
+    }
+    const { data, error: err } = await supabase.rpc("staff_reschedule_followup", { p_token: token, p_follow_up_id: f.id, p_new_date: next });
+    if (err || !data?.success) {
+      window.alert(err?.message || data?.error || "Could not reschedule.");
+      return;
+    }
+    load();
+  }
+
   const today = new Date().toISOString().slice(0, 10);
   const filtered = followUps.filter((f) => {
     if (tab === "today") return f.follow_up_date === today && f.status === "pending";
@@ -137,7 +154,7 @@ export function FollowUps() {
                   <button onClick={() => updateStatus(f.id, "completed")} className="rounded-md bg-brand-success/10 px-2 py-1 text-xs font-medium text-brand-success">
                     Complete
                   </button>
-                  <button onClick={() => updateStatus(f.id, "rescheduled")} className="rounded-md bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
+                  <button onClick={() => reschedule(f)} className="rounded-md bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700">
                     Reschedule
                   </button>
                   <button onClick={() => updateStatus(f.id, "cancelled")} className="rounded-md bg-gray-100 px-2 py-1 text-xs font-medium text-gray-500">

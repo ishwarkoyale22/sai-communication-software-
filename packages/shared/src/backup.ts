@@ -4,7 +4,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 // them (FK inserts fail otherwise). `profiles` is deliberately excluded —
 // its id must match an existing auth.users row, so restoring it blind could
 // orphan or hijack a login; staff/admin accounts are recreated through the
-// normal "Add Staff" flow instead.
+// normal "Add Staff" flow instead. `hamper_sales`, `hamper_sale_components` and
+// `gift_sales` are also excluded: inserting them re-runs the stock-deduction
+// triggers, so a restore would deduct stock a second time.
 export const BACKUP_TABLES = [
   "branches",
   "suppliers",
@@ -17,6 +19,7 @@ export const BACKUP_TABLES = [
   "finance_partners",
   "hamper_items",
   "hamper_products",
+  "gifts",
   "sales",
   "sales_items",
   "sales_targets",
@@ -30,12 +33,16 @@ export const BACKUP_TABLES = [
   "reviews",
   "enquiries",
   "website_orders",
+  "website_order_items",
   "gallery",
   "offers",
+  "offer_products",
   "services",
   "attendance",
   "leave_requests",
   "staff_tasks",
+  "follow_ups",
+  "finance_reports",
   "client_reports",
   "imei_history",
 ] as const;
