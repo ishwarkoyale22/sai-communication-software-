@@ -18,7 +18,13 @@ interface ReturnRow {
   reason: string;
   status: string;
   created_at: string;
-  website_orders: { order_number: string; customer_name: string; customer_phone: string; total_amount: number } | null;
+  website_orders: {
+    order_number: string;
+    customer_name: string;
+    customer_phone: string;
+    total_amount: number;
+    website_order_items: { item_name: string; quantity: number }[] | null;
+  } | null;
 }
 
 /** Return / refund requests filed by customers on the website. */
@@ -43,7 +49,7 @@ export function ReturnRequests() {
   async function load() {
     const { data, error: err } = await supabase
       .from("return_requests")
-      .select("*, website_orders(order_number, customer_name, customer_phone, total_amount)")
+      .select("*, website_orders(order_number, customer_name, customer_phone, total_amount, website_order_items(item_name, quantity))")
       .order("created_at", { ascending: false });
     if (err) setError(`Failed to load return requests: ${err.message}`);
     else {
@@ -84,6 +90,7 @@ export function ReturnRequests() {
           fileName="return-requests"
           rows={shown.map((r) => ({
             Order: r.website_orders?.order_number ?? "",
+            Product: (r.website_orders?.website_order_items ?? []).map((i) => `${i.item_name} x${i.quantity}`).join(", "),
             Customer: r.website_orders?.customer_name ?? "",
             Phone: r.website_orders?.customer_phone ?? "",
             Reason: r.reason,
@@ -112,6 +119,7 @@ export function ReturnRequests() {
           <thead>
             <tr>
               <th>Order</th>
+              <th>Product</th>
               <th>Customer</th>
               <th>Reason</th>
               <th>Order Total</th>
@@ -123,17 +131,20 @@ export function ReturnRequests() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-sm text-gray-400">Loading…</td>
+                <td colSpan={8} className="p-6 text-center text-sm text-gray-400">Loading…</td>
               </tr>
             )}
             {!loading && shown.length === 0 && (
               <tr>
-                <td colSpan={7} className="p-6 text-center text-sm text-gray-400">No return requests.</td>
+                <td colSpan={8} className="p-6 text-center text-sm text-gray-400">No return requests.</td>
               </tr>
             )}
             {shown.map((r) => (
               <tr key={r.id}>
                 <td className="font-mono text-xs font-semibold">{r.website_orders?.order_number ?? "—"}</td>
+                <td className="text-sm">
+                  {(r.website_orders?.website_order_items ?? []).map((i) => `${i.item_name} ×${i.quantity}`).join(", ") || "—"}
+                </td>
                 <td>
                   <div className="text-sm font-medium">{r.website_orders?.customer_name ?? "—"}</div>
                   <div className="text-xs text-gray-400">{r.website_orders?.customer_phone}</div>
