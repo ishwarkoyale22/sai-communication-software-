@@ -24,6 +24,9 @@ interface ReturnRow {
     customer_phone: string;
     total_amount: number;
     website_order_items: { item_name: string; quantity: number }[] | null;
+    payment_status: string;
+    refund_status: string;
+    refund_amount: number | null;
   } | null;
 }
 
@@ -49,7 +52,7 @@ export function ReturnRequests() {
   async function load() {
     const { data, error: err } = await supabase
       .from("return_requests")
-      .select("*, website_orders(order_number, customer_name, customer_phone, total_amount, website_order_items(item_name, quantity))")
+      .select("*, website_orders(order_number, customer_name, customer_phone, total_amount, payment_status, refund_status, refund_amount, website_order_items(item_name, quantity))")
       .order("created_at", { ascending: false });
     if (err) setError(`Failed to load return requests: ${err.message}`);
     else {
@@ -94,6 +97,7 @@ export function ReturnRequests() {
             Customer: r.website_orders?.customer_name ?? "",
             Phone: r.website_orders?.customer_phone ?? "",
             Reason: r.reason,
+            Refund: r.website_orders?.refund_status ?? "",
             Status: r.status,
             Requested: r.created_at,
           }))}
@@ -124,6 +128,7 @@ export function ReturnRequests() {
               <th>Reason</th>
               <th>Order Total</th>
               <th>Requested</th>
+              <th>Refund</th>
               <th>Status</th>
               <th>Action</th>
             </tr>
@@ -131,12 +136,12 @@ export function ReturnRequests() {
           <tbody>
             {loading && (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-sm text-gray-400">Loading…</td>
+                <td colSpan={9} className="p-6 text-center text-sm text-gray-400">Loading…</td>
               </tr>
             )}
             {!loading && shown.length === 0 && (
               <tr>
-                <td colSpan={8} className="p-6 text-center text-sm text-gray-400">No return requests.</td>
+                <td colSpan={9} className="p-6 text-center text-sm text-gray-400">No return requests.</td>
               </tr>
             )}
             {shown.map((r) => (
@@ -152,6 +157,17 @@ export function ReturnRequests() {
                 <td className="max-w-xs text-sm text-gray-600">{r.reason}</td>
                 <td>{r.website_orders ? formatCurrency(r.website_orders.total_amount) : "—"}</td>
                 <td className="text-xs text-gray-500">{formatDateTime(r.created_at)}</td>
+                <td className="text-xs">
+                  {r.website_orders?.refund_status === "refunded" ? (
+                    <span className="font-semibold text-emerald-700">Refunded {formatCurrency(r.website_orders.refund_amount ?? 0)}</span>
+                  ) : r.website_orders?.refund_status === "pending" ? (
+                    <span className="pill-warning">Refund due</span>
+                  ) : r.website_orders && r.website_orders.payment_status !== "pending" ? (
+                    <span className="text-gray-400">Paid - no refund yet</span>
+                  ) : (
+                    <span className="text-gray-400">Not paid</span>
+                  )}
+                </td>
                 <td>
                   <StatusPill status={r.status} label={r.status} />
                 </td>

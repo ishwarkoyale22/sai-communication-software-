@@ -3,7 +3,7 @@ import { formatCurrency, formatDateTime, generateSimpleInvoicePdf } from "@sai/s
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { ShoppingBag, Search, CreditCard, ChevronDown, ChevronUp, FileText } from "lucide-react";
+import { ShoppingBag, Search, CreditCard, ChevronDown, ChevronUp, FileText, Undo2 } from "lucide-react";
 
 const STATUS_OPTIONS = [
   { value: "pending", label: "Pending" },
@@ -35,6 +35,12 @@ interface Order {
   order_status: string;
   notes: string | null;
   created_at: string;
+  refund_status: "none" | "pending" | "refunded";
+  refund_amount: number | null;
+  refunded_at: string | null;
+  refund_method: string | null;
+  refund_reference: string | null;
+  refund_note: string | null;
   website_order_items?: OrderItem[];
 }
 
@@ -46,6 +52,11 @@ export function WebOrders() {
   const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Record-refund dialog: a refund is only marked done when Admin records it here.
+  const [refundFor, setRefundFor] = useState<Order | null>(null);
+  const [refundForm, setRefundForm] = useState({ amount: "", method: "cash", reference: "", note: "" });
+  const [refundSaving, setRefundSaving] = useState(false);
+  const [refundError, setRefundError] = useState<string | null>(null);
 
   useEffect(() => {
     loadOrders();
@@ -92,6 +103,39 @@ export function WebOrders() {
     }
   }
 
+  function openRefund(order: Order) {
+    setRefundFor(order);
+    setRefundError(null);
+    setRefundForm({ amount: String(order.total_amount), method: order.payment_method === "upi" ? "upi" : "cash", reference: "", note: "" });
+  }
+
+  async function saveRefund() {
+    if (!refundFor) return;
+    const amount = Number(refundForm.amount);
+    if (!amount || amount <= 0 || amount > refundFor.total_amount) {
+      setRefundError(`Enter an amount between 1 and ${formatCurrency(refundFor.total_amount)}.`);
+      return;
+    }
+    setRefundSaving(true);
+    setRefundError(null);
+    const patch = {
+      refund_status: "refunded" as const,
+      refund_amount: amount,
+      refunded_at: new Date().toISOString(),
+      refund_method: refundForm.method,
+      refund_reference: refundForm.reference.trim() || null,
+      refund_note: refundForm.note.trim() || null,
+    };
+    const { error: err } = await supabase.from("website_orders").update(patch).eq("id", refundFor.id);
+    setRefundSaving(false);
+    if (err) {
+      setRefundError(err.message);
+      return;
+    }
+    setOrders((prev) => prev.map((o) => (o.id === refundFor.id ? { ...o, ...patch } : o)));
+    setRefundFor(null);
+  }
+
   async function handleStatusChange(orderId: string, newStatus: string) {
     setUpdatingId(orderId);
     try {
@@ -105,6 +149,7 @@ export function WebOrders() {
         return;
       }
       setOrders((prev) => prev.map((o) => (o.id === orderId ? { ...o, order_status: newStatus } : o)));
+      loadOrders(); // the database raises "refund due" when a paid order is cancelled
     } catch (err: any) {
       alert(err?.message || "Failed to update order status");
     } finally {
@@ -180,6 +225,10 @@ export function WebOrders() {
             Type: o.order_type,
             Total: o.total_amount,
             Status: o.order_status,
+            "Refund status": o.refund_status,
+            "Refund amount": o.refund_amount ?? "",
+            "Refund method": o.refund_method ?? "",
+            "Refunded on": o.refunded_at ?? "",
             Items: o.website_order_items?.map((i) => `${i.item_name} (x${i.quantity})`).join(", ") ?? "",
           }))}
           fileName="website-orders"
@@ -310,6 +359,30 @@ export function WebOrders() {
                           <option value="partial">Partial</option>
                           <option value="paid">Paid</option>
                         </select>
+                        {order.refund_status === "pending" && (
+                          <div className="mt-1 flex items-center gap-1">
+                            <span className="pill-warning text-[10px]">Refund due</span>
+                            <button className="btn-secondary !px-1.5 !py-0.5 text-[10px]" onClick={() => openRefund(order)}>
+                              Record refund
+                            </button>
+                          </div>
+                        )}
+                        {order.refund_status === "refunded" && (
+                          <div className="mt-1 text-[10px] font-semibold text-emerald-700" title={order.refund_note ?? ""}>
+                            Refunded {formatCurrency(order.refund_amount ?? 0)}
+                            {order.refund_method ? ` · ${order.refund_method.replace("_", " ")}` : ""}
+                            {order.refunded_at ? ` · ${formatDateTime(order.refunded_at)}` : ""}
+                          </div>
+                        )}
+                        {order.refund_status === "none" && order.payment_status !== "pending" && (
+                          <button
+                            className="mt-1 flex items-center gap-1 text-[10px] text-gray-400 hover:text-gray-700"
+                            onClick={() => openRefund(order)}
+                            title="Record a refund paid back to the customer"
+                          >
+                            <Undo2 size={10} /> Refund
+                          </button>
+                        )}
                       </td>
                       <td className="font-semibold text-gray-900">{formatCurrency(order.total_amount)}</td>
                       <td>
@@ -379,6 +452,38 @@ export function WebOrders() {
           </tbody>
         </table>
       </div>
+      {refundFor && (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4" onClick={() => setRefundFor(null)}>
+          <div className="card w-full max-w-sm space-y-3 p-5" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold">Record refund - {refundFor.order_number}</h3>
+            <p className="text-xs text-gray-500">
+              Only record this after the money has actually been given back to {refundFor.customer_name}. Order total {formatCurrency(refundFor.total_amount)}.
+            </p>
+            {refundError && <div className="text-xs text-brand-danger">{refundError}</div>}
+            <label className="block text-xs font-medium text-gray-600">
+              Amount refunded (Rs)
+              <input className="input mt-1 w-full" type="number" min={1} value={refundForm.amount} onChange={(e) => setRefundForm({ ...refundForm, amount: e.target.value })} />
+            </label>
+            <label className="block text-xs font-medium text-gray-600">
+              Refunded by
+              <select className="input mt-1 w-full" value={refundForm.method} onChange={(e) => setRefundForm({ ...refundForm, method: e.target.value })}>
+                <option value="cash">Cash</option>
+                <option value="upi">UPI</option>
+                <option value="bank_transfer">Bank transfer</option>
+                <option value="card">Card reversal</option>
+              </select>
+            </label>
+            <input className="input w-full" placeholder="Reference / UTR (optional)" value={refundForm.reference} onChange={(e) => setRefundForm({ ...refundForm, reference: e.target.value })} />
+            <input className="input w-full" placeholder="Note (optional)" value={refundForm.note} onChange={(e) => setRefundForm({ ...refundForm, note: e.target.value })} />
+            <div className="flex gap-2 pt-1">
+              <button className="btn-ghost flex-1" onClick={() => setRefundFor(null)}>Cancel</button>
+              <button className="btn-primary flex-1" disabled={refundSaving} onClick={saveRefund}>
+                {refundSaving ? "Saving..." : "Confirm refund paid"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
