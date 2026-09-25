@@ -8,7 +8,7 @@ const SUPABASE_ANON_KEY =
   (import.meta.env.VITE_SUPABASE_ANON_KEY as string) ||
   "sb_publishable_TlkAKqE1YolICBKvRYs2FA_pIaHSTs2";
 
-export const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const supabase = createSupabaseClient(SUPABASE_URL, SUPABASE_ANON_KEY, { swr: true });
 
 // Defaults below are the shop's real details, transcribed directly from an
 // actual printed Tax Invoice (not placeholders) — so the GST Tax Invoice

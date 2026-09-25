@@ -1,3 +1,4 @@
+import { markNavigation } from "@sai/shared";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { SmoothScroll } from "./SmoothScroll";
@@ -112,6 +113,7 @@ export function Layout() {
   // drawer below that — closed by default so a phone/tablet load doesn't
   // start with a full-height overlay covering the page.
   const [navOpen, setNavOpen] = useState(false);
+  const bumpedThisVisit = useRef(false);
   const mainRef = useRef<HTMLElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
 
@@ -119,7 +121,25 @@ export function Layout() {
   // leave the overlay sitting open behind the new page.
   useEffect(() => {
     setNavOpen(false);
+    bumpedThisVisit.current = false;
+    markNavigation(); // lets the data cache answer this page's reads instantly
   }, [location.pathname]);
+
+  // When the quiet background refresh finds newer data than what was shown instantly,
+  // re-render the page once with it - unless the user has started typing or opened a dialog.
+  const [dataRev, setDataRev] = useState(0);
+  useEffect(() => {
+    const onRefreshed = () => {
+      const el = document.activeElement;
+      const typing = el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName);
+      if (typing || document.querySelector("main .fixed")) return;
+      if (bumpedThisVisit.current) return; // once per page visit, never a refresh loop
+      bumpedThisVisit.current = true;
+      setDataRev((n) => n + 1);
+    };
+    window.addEventListener("sai-data-refreshed", onRefreshed);
+    return () => window.removeEventListener("sai-data-refreshed", onRefreshed);
+  }, []);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-page">
@@ -267,7 +287,7 @@ export function Layout() {
         </header>
         <main ref={mainRef} className="flex-1 overflow-y-auto p-3 sm:p-5">
           <div ref={mainContentRef}>
-            <Outlet />
+            <Outlet key={dataRev} />
           </div>
         </main>
         <SmoothScroll wrapperRef={mainRef} contentRef={mainContentRef} />

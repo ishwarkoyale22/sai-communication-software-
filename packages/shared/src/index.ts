@@ -12,3 +12,4 @@ export * from "./format";
 export * from "./financeProviders";
 export * from "./recycleBin";
 export * from "./backup";
+export { markNavigation, clearFetchCache } from "./swrFetch";
