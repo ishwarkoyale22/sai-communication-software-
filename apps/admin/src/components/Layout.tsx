@@ -178,9 +178,7 @@ export function Layout() {
 
         <div className="relative flex h-topbar items-center justify-between gap-2.5 px-4">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-gold/40 bg-gradient-to-br from-gold to-goldDim font-serif text-sm font-bold text-sidebar shadow-sm">
-              S
-            </div>
+            <img src="/logo-mark.png" alt="Sai Communication" className="h-9 w-9 shrink-0 rounded-full shadow-sm" />
             <div className="flex min-w-0 flex-col leading-tight">
               <span className="truncate font-serif text-sm font-semibold text-white">Sai Communication</span>
               <span className="text-[10px] uppercase tracking-wider text-gold/70">Admin Portal</span>

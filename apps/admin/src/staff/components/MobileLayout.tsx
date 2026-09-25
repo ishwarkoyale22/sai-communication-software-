@@ -52,6 +52,7 @@ export function MobileLayout() {
             style={{ background: "radial-gradient(220px circle at 12% 0%, rgba(201,151,90,0.14), transparent 70%)" }}
           />
           <div className="relative flex items-center gap-2.5">
+            <img src="/logo-mark.png" alt="Sai Communication" className="h-8 w-8 rounded-full shadow-sm" />
             <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-gold to-goldDim font-serif text-xs font-bold text-white shadow-sm">
               {initials || <Clock size={14} />}
             </div>

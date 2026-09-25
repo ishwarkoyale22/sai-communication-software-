@@ -86,6 +86,7 @@ export function ResetPassword() {
   return (
     <div className="flex h-screen items-center justify-center bg-page">
       <div className="card w-80 p-6">
+        <img src="/logo-mark.png" alt="Sai Communication" className="mx-auto mb-3 h-14 w-14 rounded-full" />
         <h1 className="mb-1 text-lg font-semibold text-gray-800">Sai Communication</h1>
         <p className="mb-5 text-sm text-gray-500">Set a new password</p>
 
