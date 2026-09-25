@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Attendance } from "@sai/shared";
 import { supabase, getGeolocation } from "../lib/supabase";
+import { wipeFetchCache } from "@sai/shared";
 
 const STAFF_KEY = "sai_staff_session";
 const TOKEN_KEY = "sai_staff_token";
@@ -135,6 +136,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   // The server session ran out (or an admin deactivated the account). Without this the
   // portal stayed open showing empty lists while every action silently failed.
   function endExpiredSession() {
+    wipeFetchCache();
     localStorage.removeItem(STAFF_KEY);
     localStorage.removeItem(TOKEN_KEY);
     setStaff(null);
@@ -258,6 +260,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         new Promise((resolve) => setTimeout(resolve, 4000)),
       ]);
     }
+    wipeFetchCache();
     localStorage.removeItem(STAFF_KEY);
     localStorage.removeItem(TOKEN_KEY);
     setStaff(null);

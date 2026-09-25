@@ -1166,6 +1166,25 @@ export function Inventory() {
       return a.name.localeCompare(b.name);
     });
 
+  // Render the table in slices: mounting all ~450 rows (each with an image and several buttons)
+  // took ~0.5s on every visit even when the data was already in memory. Exports/print still use
+  // the full `filtered` list.
+  const PAGE_SIZE = 60;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [category, brandFilter, search, sortKey]);
+  const moreRef = useRef<HTMLTableRowElement | null>(null);
+  useEffect(() => {
+    const el = moreRef.current;
+    if (!el) return;
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) setVisibleCount((n) => n + PAGE_SIZE);
+    }, { rootMargin: "600px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visibleCount, filtered.length]);
+
   function productRowHtml(p: InventoryItem) {
     return `<tr>
           <td>${p.name} ${p.model}</td>
@@ -1338,7 +1357,7 @@ export function Inventory() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((p) => {
+            {filtered.slice(0, visibleCount).map((p) => {
               const low = p.stock <= 5;
               return (
                 <tr key={p.id} className={low ? "bg-red-50/60" : !p.is_active ? "opacity-50" : ""}>
@@ -1347,6 +1366,7 @@ export function Inventory() {
                       <img
                         src={p.images[0]}
                         alt={p.name}
+                        loading="lazy"
                         className="h-10 w-10 rounded object-cover"
                         onError={(e) => ((e.target as HTMLImageElement).style.visibility = "hidden")}
                       />
@@ -1443,6 +1463,13 @@ export function Inventory() {
                 </tr>
               );
             })}
+            {filtered.length > visibleCount && (
+              <tr ref={moreRef}>
+                <td colSpan={8} className="py-3 text-center text-xs text-gray-400">
+                  Showing {visibleCount} of {filtered.length} - loading more as you scroll…
+                </td>
+              </tr>
+            )}
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={8} className="py-8 text-center text-gray-400">

@@ -1,11 +1,33 @@
-import { useRef } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { markNavigation } from "@sai/shared";
 import { Home, Clock, ListChecks, Bell, LogOut } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { SmoothScroll } from "../../components/SmoothScroll";
 
 export function MobileLayout() {
   const { staff, signOut, unreadNotifications } = useStaffAuth();
+  const location = useLocation();
+  // Lets the data cache answer this page's reads instantly (see swrFetch in @sai/shared).
+  const bumped = useRef(false);
+  useEffect(() => {
+    bumped.current = false;
+    markNavigation();
+  }, [location.pathname]);
+  // Re-render the page once if the quiet background refresh found newer data
+  // (not while typing or with a form sheet open).
+  const [dataRev, setDataRev] = useState(0);
+  useEffect(() => {
+    const onRefreshed = () => {
+      const el = document.activeElement;
+      if ((el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) || document.querySelector("main .fixed")) return;
+      if (bumped.current) return;
+      bumped.current = true;
+      setDataRev((n) => n + 1);
+    };
+    window.addEventListener("sai-data-refreshed", onRefreshed);
+    return () => window.removeEventListener("sai-data-refreshed", onRefreshed);
+  }, []);
   const mainRef = useRef<HTMLElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
   const firstName = staff?.name?.split(" ")[0] ?? "";
@@ -45,7 +67,7 @@ export function MobileLayout() {
         </header>
         <main ref={mainRef} className="flex-1 overflow-y-auto bg-page p-4 pb-20">
           <div ref={mainContentRef}>
-            <Outlet />
+            <Outlet key={dataRev} />
           </div>
         </main>
         <SmoothScroll wrapperRef={mainRef} contentRef={mainContentRef} />

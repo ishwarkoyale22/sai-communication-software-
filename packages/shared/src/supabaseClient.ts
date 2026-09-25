@@ -1,5 +1,5 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { swrFetch, clearFetchCache } from "./swrFetch";
+import { swrFetch, wipeFetchCache } from "./swrFetch";
 
 /**
  * One Supabase client factory shared by all three apps (admin / staff / web).
@@ -19,6 +19,6 @@ export function createSupabaseClient(url: string, anonKey: string, options: { sw
     },
     ...(options.swr ? { global: { fetch: swrFetch } } : {}),
   });
-  if (options.swr) client.auth.onAuthStateChange((event) => event === "SIGNED_OUT" && clearFetchCache());
+  if (options.swr) client.auth.onAuthStateChange((event) => event === "SIGNED_OUT" && wipeFetchCache());
   return client;
 }
