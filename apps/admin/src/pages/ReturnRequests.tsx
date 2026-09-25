@@ -119,7 +119,7 @@ export function ReturnRequests() {
       {error && <div className="rounded-md bg-red-50 p-3 text-sm text-brand-danger">{error}</div>}
 
       <div className="card overflow-x-auto">
-        <table className="data-table">
+        <table className="table-base min-w-[880px]">
           <thead>
             <tr>
               <th>Order</th>
@@ -146,7 +146,7 @@ export function ReturnRequests() {
             )}
             {shown.map((r) => (
               <tr key={r.id}>
-                <td className="font-mono text-xs font-semibold">{r.website_orders?.order_number ?? "—"}</td>
+                <td className="whitespace-nowrap font-mono text-xs font-semibold">{r.website_orders?.order_number ?? "—"}</td>
                 <td className="text-sm">
                   {(r.website_orders?.website_order_items ?? []).map((i) => `${i.item_name} ×${i.quantity}`).join(", ") || "—"}
                 </td>
