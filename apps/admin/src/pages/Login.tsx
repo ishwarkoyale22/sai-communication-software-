@@ -166,7 +166,7 @@ export function Login() {
           className="group relative overflow-hidden rounded-3xl border border-white/60 bg-white/90 p-7 shadow-[0_30px_70px_-20px_rgba(31,58,138,0.35)] backdrop-blur-xl transition-[transform,box-shadow,border-color] duration-500 ease-out animate-card-float hover:-translate-y-2 hover:scale-[1.01] hover:border-gold/50 hover:shadow-[0_40px_90px_-16px_rgba(201,151,90,0.45)] before:pointer-events-none before:absolute before:inset-x-0 before:top-0 before:h-24 before:bg-gradient-to-b before:from-white/70 before:to-transparent before:content-['']"
         >
           <div className="relative mb-6 text-center">
-            <img src="/logo-mark.png" alt="Sai Communication" className="mx-auto mb-3 h-16 w-16 rounded-full shadow-[0_8px_20px_-6px_rgba(31,58,138,0.5)]" />
+            <img src="/logo-mark.png" alt="Sai Communication" className="mx-auto mb-3 h-20 w-20 rounded-full shadow-[0_8px_20px_-6px_rgba(31,58,138,0.5)]" />
             <h1 className="font-serif text-2xl font-semibold text-gray-900">Sai Communication</h1>
             <p className="mt-1 text-xs font-medium uppercase tracking-wider text-gold">
               {mode === "admin" ? "Retail ERP Admin Portal" : "Staff Portal Login"}
