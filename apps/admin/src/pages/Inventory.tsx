@@ -309,6 +309,25 @@ const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "stock_desc", label: "Stock (High-Low)" },
 ];
 
+// The scanner <div> only exists once its "active" state has rendered, and Html5Qrcode
+// throws (a plain string, not an Error) when its element is missing — so wait for it.
+async function waitForElement(id: string) {
+  for (let i = 0; i < 30 && !document.getElementById(id); i++) {
+    await new Promise((r) => setTimeout(r, 30));
+  }
+}
+
+// Html5Qrcode rejects with strings / DOMExceptions, so err.message is often empty.
+function cameraErrorMessage(err: unknown): string {
+  const text = typeof err === "string" ? err : (err as { name?: string; message?: string })?.name ?? "";
+  const msg = typeof err === "string" ? err : (err as { message?: string })?.message ?? "";
+  if (/NotAllowed|Permission/i.test(text + msg)) return "Camera permission is blocked. Tap the lock icon next to the address bar, set Camera to Allow, then reload and try again.";
+  if (/NotFound|Requested device not found/i.test(text + msg)) return "No camera was found on this device.";
+  if (/NotReadable|in use/i.test(text + msg)) return "The camera is being used by another app. Close it and try again.";
+  if (!window.isSecureContext) return "The camera only works on a secure (https) page.";
+  return msg || text || "Could not start the camera.";
+}
+
 export function Inventory() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [category, setCategory] = useState<string>("All");
@@ -681,9 +700,10 @@ export function Inventory() {
     setScanFeedback(null);
     setSerialsModalError(null);
     try {
+      setScanActive(true);
+      await waitForElement("imei-scanner-region");
       const scanner = new Html5Qrcode("imei-scanner-region");
       scannerRef.current = scanner;
-      setScanActive(true);
       await scanner.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: 250 },
@@ -694,7 +714,8 @@ export function Inventory() {
       );
     } catch (err: any) {
       setScanActive(false);
-      const message = err?.message || "Could not start camera — permission may be denied.";
+      scannerRef.current = null;
+      const message = cameraErrorMessage(err);
       // scanFeedback renders in both the Add-Product form's scan section and
       // the Manage Serials modal's, so the failure is visible regardless of
       // which one is open; serialsModalError additionally surfaces it in the
@@ -894,9 +915,10 @@ export function Inventory() {
     if (invoiceScanActive) return;
     setInvoiceScanFeedback(null);
     try {
+      setInvoiceScanActive(true);
+      await waitForElement("invoice-scanner-region");
       const scanner = new Html5Qrcode("invoice-scanner-region");
       invoiceScannerRef.current = scanner;
-      setInvoiceScanActive(true);
       await scanner.start(
         { facingMode: "environment" },
         { fps: 10, qrbox: 250 },
@@ -907,7 +929,8 @@ export function Inventory() {
       );
     } catch (err: any) {
       setInvoiceScanActive(false);
-      setInvoiceScanFeedback(err?.message || "Could not start camera — permission may be denied.");
+      invoiceScannerRef.current = null;
+      setInvoiceScanFeedback(cameraErrorMessage(err));
     }
   }
 
