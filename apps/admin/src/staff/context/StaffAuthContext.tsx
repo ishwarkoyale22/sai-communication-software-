@@ -230,6 +230,8 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       if (lat == null || lng == null) {
         const why: Record<string, string> = {
           denied: "Location permission is blocked. Tap the lock icon next to the address bar, set Location to Allow, then try again.",
+          "denied-os": "Your phone is blocking location for this browser. Open Settings → Apps → (your browser) → Permissions → Location and choose Allow, make sure the phone's Location switch is On, then try again.",
+          "in-app": "This page is open inside another app (WhatsApp/Instagram etc.), which blocks location. Open the link in Chrome or Safari and sign in there.",
           timeout: "Could not get your location in time. Turn on the phone's Location (GPS), move near a window or outdoors, then try again.",
           unavailable: "Your phone could not find its location. Turn on the phone's Location (GPS) in Settings, then try again.",
           insecure: "Location only works on a secure (https) page. Open the portal using its https address.",

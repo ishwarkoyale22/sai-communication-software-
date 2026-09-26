@@ -15,7 +15,7 @@ export async function locationPermissionState(): Promise<PermissionState | null>
   }
 }
 
-export type GeoResult = { lat: number | null; lng: number | null; reason?: "unsupported" | "insecure" | "denied" | "unavailable" | "timeout" };
+export type GeoResult = { lat: number | null; lng: number | null; reason?: "unsupported" | "insecure" | "denied" | "denied-os" | "in-app" | "unavailable" | "timeout" };
 
 function tryPosition(options: PositionOptions): Promise<GeoResult> {
   return new Promise((resolve) => {
@@ -39,7 +39,12 @@ export async function getGeolocation(): Promise<GeoResult> {
   if (!window.isSecureContext) return { lat: null, lng: null, reason: "insecure" };
   // Once blocked, the browser never asks again, so don't wait on a call that can only fail.
   if ((await locationPermissionState()) === "denied") return { lat: null, lng: null, reason: "denied" };
+  // In-app browsers (WhatsApp/Instagram/Facebook links, Android WebView) refuse location without any prompt.
+  if (/FBAN|FBAV|Instagram|WhatsApp|Line\/|; wv\)|Snapchat|Telegram/i.test(navigator.userAgent)) return { lat: null, lng: null, reason: "in-app" };
+  const before = await locationPermissionState();
   const precise = await tryPosition({ enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 });
+  // The site was still askable ("prompt") yet was refused instantly: the phone itself is blocking Chrome.
+  if (precise.reason === "denied" && before === "prompt") return { ...precise, reason: "denied-os" };
   if (precise.lat != null || precise.reason === "denied") return precise;
   return tryPosition({ enableHighAccuracy: false, timeout: 15000, maximumAge: 300000 });
 }
