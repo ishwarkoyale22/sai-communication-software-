@@ -40,6 +40,9 @@ interface InventoryItem {
   price: number;
   stock: number;
   is_serialized: boolean;
+  /** From the product (Add/Edit Product) — fills the invoice line's HSN and GST rate. */
+  hsn_sac?: string | null;
+  gst_rate?: number | null;
 }
 interface AvailableUnit {
   id: string;
@@ -183,7 +186,7 @@ export function Sales() {
 
   useEffect(() => {
     load();
-    supabase.from("inventory").select("id, name, model, price, stock, is_serialized").eq("is_active", true).order("name").then(({ data }) => setInventory((data as InventoryItem[]) ?? []));
+    supabase.from("inventory").select("id, name, model, price, stock, is_serialized, hsn_sac, gst_rate").eq("is_active", true).order("name").then(({ data }) => setInventory((data as InventoryItem[]) ?? []));
     supabase.from("gifts").select("id, name, price, cost_price, stock, is_active").eq("is_active", true).order("name").then(({ data }) => setGifts((data as GiftItem[]) ?? []));
     refreshHampers();
     supabase.from("staff").select("id, name").eq("is_active", true).order("name").then(({ data }) => setStaffList((data as StaffLite[]) ?? []));
@@ -248,8 +251,8 @@ export function Sales() {
           serial_no: unitLabel(unit),
           unit_id: unit.id,
           unitSnapshot: unit,
-          hsn_sac: "",
-          gst_rate: null,
+          hsn_sac: item.hsn_sac ?? "",
+          gst_rate: item.gst_rate ?? null,
         },
       ]);
       setAvailableUnits((prev) => prev.filter((u) => u.id !== unit.id));
@@ -262,7 +265,7 @@ export function Sales() {
       if (existing) {
         return prev.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l));
       }
-      return [...prev, { key: item.id, inventory_id: item.id, item_name: `${item.name} ${item.model}`, quantity: 1, unit_price: item.price, serial_no: "", unit_id: null, hsn_sac: "", gst_rate: null }];
+      return [...prev, { key: item.id, inventory_id: item.id, item_name: `${item.name} ${item.model}`, quantity: 1, unit_price: item.price, serial_no: "", unit_id: null, hsn_sac: item.hsn_sac ?? "", gst_rate: item.gst_rate ?? null }];
     });
     // Clear the search box too, so the next item can be searched and added right away.
     setPickId("");
@@ -735,7 +738,7 @@ export function Sales() {
       setGstRateCustom(18);
       setShowForm(false);
       await load();
-      const { data: freshInv } = await supabase.from("inventory").select("id, name, model, price, stock, is_serialized").eq("is_active", true).order("name");
+      const { data: freshInv } = await supabase.from("inventory").select("id, name, model, price, stock, is_serialized, hsn_sac, gst_rate").eq("is_active", true).order("name");
       setInventory((freshInv as InventoryItem[]) ?? []);
       const { data: freshGifts } = await supabase.from("gifts").select("id, name, price, cost_price, stock, is_active").eq("is_active", true).order("name");
       setGifts((freshGifts as GiftItem[]) ?? []);
