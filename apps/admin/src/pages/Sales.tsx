@@ -147,6 +147,7 @@ export function Sales() {
   const [staffId, setStaffId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
+  const [typeFilter, setTypeFilter] = useState<"all" | "website" | "in_store">("all");
   const [showForm, setShowForm] = useState(false);
   const [customerId, setCustomerId] = useState("");
   const [customerName, setCustomerName] = useState("");
@@ -843,8 +844,10 @@ export function Sales() {
   const filtered = sales.filter((s) => {
     if (dateFrom && s.created_at < dateFrom) return false;
     if (dateTo && s.created_at > dateTo + "T23:59:59") return false;
+    if (typeFilter !== "all" && s.sale_type !== typeFilter) return false;
     return true;
   });
+  const typeCount = (t: "website" | "in_store") => sales.filter((s) => s.sale_type === t).length;
 
   return (
     <div className="space-y-4">
@@ -869,6 +872,26 @@ export function Sales() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <div className="flex rounded-lg border border-border bg-card p-0.5" role="tablist" aria-label="Order type">
+          {([
+            { key: "all", label: "All", count: sales.length },
+            { key: "website", label: "Website", count: typeCount("website") },
+            { key: "in_store", label: "In-store", count: typeCount("in_store") },
+          ] as const).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={typeFilter === t.key}
+              onClick={() => setTypeFilter(t.key)}
+              className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                typeFilter === t.key ? "bg-brand-primary text-white" : "text-gray-500 hover:text-gray-800"
+              }`}
+            >
+              {t.label} <span className={typeFilter === t.key ? "text-white/80" : "text-gray-400"}>({t.count})</span>
+            </button>
+          ))}
+        </div>
         <input type="date" className="input w-auto" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
         <span className="text-sm text-gray-400">to</span>
         <input type="date" className="input w-auto" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
