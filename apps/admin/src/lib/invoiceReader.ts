@@ -94,6 +94,22 @@ export function parseInvoiceLines(lines: string[]): InvoiceLine[] {
       last.name = `${last.name} ${line.trim()}`;
     }
   }
+  if (rows.length > 0) return rows;
+
+  // Second pass for tables without a serial-number column: any line with a name and 2+ amounts.
+  for (const line of lines) {
+    const tokens = line.replace(/\s+/g, " ").trim().split(" ");
+    const decimals = tokens.filter((t) => DECIMAL_RE.test(t)).map(num);
+    const firstNum = tokens.findIndex((t) => /^[\d,]+(\.\d+)?$/.test(t) && t.length >= 3);
+    const name = (firstNum > 0 ? tokens.slice(0, firstNum) : tokens.slice(0, 3)).join(" ").replace(/^\d{1,3}\s+/, "");
+    if (decimals.length >= 2 && /[a-z]{3}/i.test(name) && !/total|gst|tax|round|bank|ifsc|amount in/i.test(line)) {
+      const amount = decimals[decimals.length - 1];
+      const unitIdx = tokens.findIndex((t) => UNIT_RE.test(t));
+      const qty = unitIdx > 0 && /^\d+(\.\d+)?$/.test(tokens[unitIdx - 1]) ? num(tokens[unitIdx - 1]) : 1;
+      const rate = decimals.find((v) => Math.abs(v * qty - amount) <= Math.max(1, amount * 0.001)) ?? amount / qty;
+      rows.push({ name, qty, unitCost: Math.round(rate * 100) / 100, amount });
+    }
+  }
   return rows;
 }
 
@@ -131,8 +147,53 @@ async function imageToLines(file: File, onProgress?: (pct: number) => void): Pro
   return res.data.text.split("\n").map((l: string) => l.trim()).filter(Boolean);
 }
 
-export async function readInvoiceFile(file: File, onProgress?: (pct: number) => void): Promise<{ lines: InvoiceLine[]; source: "pdf" | "photo" }> {
+async function pdfPagesToOcrLines(file: File, onProgress?: (pct: number) => void): Promise<string[]> {
+  const pdfjs = await import("pdfjs-dist");
+  const worker = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+  pdfjs.GlobalWorkerOptions.workerSrc = worker;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const out: string[] = [];
+  for (let p = 1; p <= Math.min(pdf.numPages, 3); p++) {
+    const page = await pdf.getPage(p);
+    const viewport = page.getViewport({ scale: 2.2 });
+    const canvas = document.createElement("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    await page.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport }).promise;
+    const blob: Blob = await new Promise((res) => canvas.toBlob((b) => res(b as Blob), "image/png"));
+    out.push(...(await imageToLines(new File([blob], `p${p}.png`, { type: "image/png" }), onProgress)));
+  }
+  return out;
+}
+
+export async function readInvoiceFile(
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<{ lines: InvoiceLine[]; rawLines: string[]; source: "pdf" | "photo" }> {
   const isPdf = file.type === "application/pdf" || /\.pdf$/i.test(file.name);
-  const text = isPdf ? await pdfToLines(file) : await imageToLines(file, onProgress);
-  return { lines: parseInvoiceLines(text), source: isPdf ? "pdf" : "photo" };
+  let text = isPdf ? await pdfToLines(file) : await imageToLines(file, onProgress);
+  // A PDF with no embedded text is a scanned picture — read it by OCR instead.
+  if (isPdf && text.join("").replace(/\s/g, "").length < 40) text = await pdfPagesToOcrLines(file, onProgress);
+  return { lines: parseInvoiceLines(text), rawLines: text, source: isPdf ? "pdf" : "photo" };
+}
+
+/** Finds and decodes a QR code inside a photo (dense government e-invoice QRs included). */
+export async function decodeQrFromImage(file: File): Promise<string | null> {
+  const { readBarcodes, setZXingModuleOverrides } = await import("zxing-wasm/reader");
+  const wasmUrl = (await import("zxing-wasm/reader/zxing_reader.wasm?url")).default;
+  setZXingModuleOverrides({ locateFile: (path: string, prefix: string) => (path.endsWith(".wasm") ? wasmUrl : prefix + path) });
+  const bmp = await createImageBitmap(file);
+  const tryScales = [1, 0.5];
+  for (const sc of tryScales) {
+    const maxSide = 2600;
+    const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height)) * sc;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bmp.width * k));
+    canvas.height = Math.max(1, Math.round(bmp.height * k));
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), { tryHarder: true, tryRotate: true, formats: ["QRCode"], maxNumberOfSymbols: 1 });
+    if (found.length && found[0].text) return found[0].text;
+  }
+  return null;
 }

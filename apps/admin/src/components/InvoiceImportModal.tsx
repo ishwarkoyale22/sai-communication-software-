@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { X, Upload, Plus, Check, AlertCircle, Trash2 } from "lucide-react";
 import { formatCurrency } from "@sai/shared";
 import { supabase } from "../lib/supabase";
-import { readInvoiceFile, type EInvoiceSummary } from "../lib/invoiceReader";
+import { readInvoiceFile, decodeQrFromImage, decodeEInvoiceQr, type EInvoiceSummary } from "../lib/invoiceReader";
 
 const CATEGORY_OPTIONS = ["Smartphones", "Feature Phones", "Tablets", "Accessories", "Refurbished", "Home Appliances"];
 
@@ -29,7 +29,7 @@ let rowKey = 1;
 const newRow = (p: Partial<Row> = {}): Row => ({ key: rowKey++, name: "", category: "Accessories", qty: 1, unitCost: 0, salePrice: 0, status: "pending", ...p });
 
 export function InvoiceImportModal({
-  summary,
+  summary: initialSummary,
   existing,
   onClose,
   onDone,
@@ -39,6 +39,8 @@ export function InvoiceImportModal({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const [summary, setSummary] = useState<EInvoiceSummary | null>(initialSummary);
+  const [rawLines, setRawLines] = useState<string[]>([]);
   const expected = summary?.itemCount ?? 0;
   const [rows, setRows] = useState<Row[]>(() => Array.from({ length: Math.max(expected, 1) }, () => newRow()));
   const [reading, setReading] = useState<string | null>(null);
@@ -57,27 +59,58 @@ export function InvoiceImportModal({
     if (!file) return;
     setReading("Reading invoice…");
     setReadMsg(null);
+    setRawLines([]);
+    const notes: string[] = [];
     try {
-      const { lines, source } = await readInvoiceFile(file, (pct) => setReading(`Reading photo… ${pct}%`));
+      const isImage = file.type.startsWith("image/");
+      // A photo of the invoice usually shows its QR too — read that for the summary.
+      if (isImage) {
+        try {
+          const qr = await decodeQrFromImage(file);
+          const found = qr ? decodeEInvoiceQr(qr) : null;
+          if (found) {
+            setSummary(found);
+            notes.push("QR read: invoice summary filled in.");
+          } else notes.push(qr ? "A QR was found but it is not a GST e-invoice QR." : "No QR code was found in the photo.");
+        } catch {
+          notes.push("Could not check the photo for a QR.");
+        }
+      }
+      setReading("Reading items…");
+      const { lines, rawLines: raw, source } = await readInvoiceFile(file, (pct) => setReading(`Reading items… ${pct}%`));
       if (lines.length === 0) {
-        setReadMsg(
-          source === "pdf"
-            ? "No item rows could be read from this PDF (it may be a scanned image). Try a photo of it, or add the items below by hand."
-            : "No item rows could be read from this photo. Try a sharper, straight-on photo, or add the items below by hand."
+        setRawLines(raw);
+        notes.push(
+          raw.length
+            ? "Could not recognise item rows automatically. The text that was read is listed below — tap a line to use it as an item, or add items by hand."
+            : "No text could be read from the file. Try a sharper, straight-on photo, or add the items by hand."
         );
       } else {
         setRows((prev) => {
           const kept = prev.filter((r) => r.name.trim() || r.status !== "pending");
           return [...kept, ...lines.map((l) => newRow({ name: l.name, qty: l.qty, unitCost: l.unitCost }))];
         });
-        setReadMsg(`Read ${lines.length} item${lines.length === 1 ? "" : "s"} from the ${source === "pdf" ? "PDF" : "photo"}. Please check every row — names and prices can be misread.`);
+        notes.push(`Read ${lines.length} item${lines.length === 1 ? "" : "s"} from the ${source === "pdf" ? "PDF" : "photo"}. Please check every row — names and prices can be misread.`);
       }
     } catch (e: any) {
-      setReadMsg(`Could not read that file: ${e?.message || "unknown error"}. You can still add the items by hand.`);
+      notes.push(`Could not read the items: ${e?.message || "unknown error"}. You can still add them by hand.`);
     } finally {
+      setReadMsg(notes.join(" "));
       setReading(null);
       if (fileRef.current) fileRef.current.value = "";
     }
+  }
+
+  function useLine(line: string) {
+    const tokens = line.trim().split(/\s+/);
+    const cut = tokens.findIndex((t) => /^[\d,]+(\.\d+)?$/.test(t) && t.length >= 3);
+    const name = (cut > 0 ? tokens.slice(0, cut) : tokens).join(" ").replace(/^\d{1,3}\s+/, "");
+    const amounts = tokens.filter((t) => /^\d[\d,]*\.\d{1,2}$/.test(t)).map((t) => Number(t.replace(/,/g, "")));
+    setRows((prev) => {
+      const empty = prev.find((r) => r.status === "pending" && !r.name.trim());
+      const row = newRow({ name, unitCost: amounts.length >= 2 ? amounts[amounts.length - 2] : amounts[0] ?? 0 });
+      return empty ? prev.map((r) => (r.key === empty.key ? { ...row, key: empty.key } : r)) : [...prev, row];
+    });
   }
 
   async function addRow(row: Row) {
@@ -172,9 +205,18 @@ export function InvoiceImportModal({
           <div className="rounded-lg border border-dashed border-gray-300 p-3">
             <input ref={fileRef} type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => onFile(e.target.files?.[0])} />
             <button className="btn-secondary w-full text-xs" disabled={!!reading} onClick={() => fileRef.current?.click()}>
-              <Upload size={13} /> {reading ?? "Read items from invoice PDF / photo (optional)"}
+              <Upload size={13} /> {reading ?? "Upload invoice PDF / photo (reads QR + items)"}
             </button>
             {readMsg && <p className="mt-1.5 text-center text-xs text-gray-600">{readMsg}</p>}
+            {rawLines.length > 0 && (
+              <div className="mt-2 max-h-40 space-y-0.5 overflow-y-auto rounded border border-border bg-white p-1.5 text-[11px]">
+                {rawLines.slice(0, 80).map((l, i) => (
+                  <button key={i} className="block w-full truncate rounded px-1 py-0.5 text-left text-gray-600 hover:bg-accent" onClick={() => useLine(l)}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center justify-between text-xs">

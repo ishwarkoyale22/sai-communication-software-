@@ -4,7 +4,7 @@ import { formatCurrency, validateImei, normalizeImei, softDelete } from "@sai/sh
 import type { InventoryUnit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
-import { Html5Qrcode } from "html5-qrcode";
+import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { InvoiceImportModal } from "../components/InvoiceImportModal";
 import { decodeEInvoiceQr, type EInvoiceSummary } from "../lib/invoiceReader";
 
@@ -921,11 +921,17 @@ export function Inventory() {
     try {
       setInvoiceScanActive(true);
       await waitForElement("invoice-scanner-region");
-      const scanner = new Html5Qrcode("invoice-scanner-region");
+      // Government e-invoice QRs are very dense: scan the whole frame at high resolution and use the
+      // phone's built-in barcode detector where available (the JS decoder alone often fails on them).
+      const scanner = new Html5Qrcode("invoice-scanner-region", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], useBarCodeDetectorIfSupported: true, verbose: false });
       invoiceScannerRef.current = scanner;
       await scanner.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: 250 },
+        {
+          fps: 8,
+          qrbox: (w: number, h: number) => ({ width: Math.floor(Math.min(w, h) * 0.95), height: Math.floor(Math.min(w, h) * 0.95) }),
+          videoConstraints: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 }, focusMode: "continuous" } as MediaTrackConstraints,
+        },
         (decoded) => onInvoiceScanDecoded(decoded),
         () => {
           /* per-frame errors are noise, don't surface */
@@ -1553,7 +1559,7 @@ export function Inventory() {
                   </button>
                 ) : (
                   <>
-                    <div id="invoice-scanner-region" className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
+                    <div id="invoice-scanner-region" className="mx-auto w-full max-w-md overflow-hidden rounded-md bg-gray-100" />
                     <button type="button" className="btn-ghost mt-2 w-full text-xs" onClick={stopInvoiceScanner}>
                       Stop Camera
                     </button>
