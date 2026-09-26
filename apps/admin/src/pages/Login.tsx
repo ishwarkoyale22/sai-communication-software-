@@ -3,7 +3,6 @@ import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useStaffAuth, portalPathForRole } from "../staff/context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
-import { getGeolocation, locationPermissionState } from "../staff/lib/supabase";
 import { AlertCircle, CheckCircle } from "lucide-react";
 
 export function Login() {
@@ -36,21 +35,6 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // Ask for location as soon as the Staff tab opens, so the browser's Allow prompt is
-  // answered before sign-in (instead of racing the sign-in tap), and tell the person
-  // up front if location is already blocked.
-  useEffect(() => {
-    if (mode !== "staff") return;
-    (async () => {
-      const state = await locationPermissionState();
-      if (state === "denied") {
-        setError("Location is blocked for this site. Tap the lock icon next to the address bar, set Location to Allow, then reload this page. (On Android also check Settings → Apps → Chrome → Permissions → Location, and that phone Location is On.)");
-      } else if (state === "prompt") {
-        getGeolocation();
-      }
-    })();
-  }, [mode]);
 
   // If already authenticated, redirect to the panel matching the role —
   // this is also what enforces "staff can never land on the admin panel":

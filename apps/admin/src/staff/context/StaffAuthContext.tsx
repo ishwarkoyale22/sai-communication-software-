@@ -201,20 +201,6 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       return { error: "Please enter your 10-digit phone number and 4-digit PIN." };
     }
 
-    // Live location is mandatory: ask for it BEFORE anything else, so a staff
-    // member who blocks it never gets a session at all.
-    const { lat, lng, reason } = await getGeolocation();
-    if (lat == null || lng == null) {
-      const why: Record<string, string> = {
-        denied: "Location permission is blocked. Tap the lock icon next to the address bar, set Location to Allow, then try again.",
-        timeout: "Could not get your location in time. Turn on the phone's Location (GPS), move near a window or outdoors, then try again.",
-        unavailable: "Your phone could not find its location. Turn on the phone's Location (GPS) in Settings, then try again.",
-        insecure: "Location only works on a secure (https) page. Open the portal using its https address.",
-        unsupported: "This browser does not support location. Please use Chrome or Safari.",
-      };
-      return { error: `Login blocked: ${why[reason ?? "unavailable"]}` };
-    }
-
     try {
       // issue_staff_session re-verifies phone+PIN itself (never trusts the
       // client) and returns a server-issued session token — every
@@ -237,6 +223,21 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       if (expectedRole && portalRoles.includes(staffLite.role) && staffLite.role !== expectedRole) {
         return { error: "Login failed: this account is not registered for the selected role. Choose your own role and try again." };
       }
+
+      // Credentials are correct — only now ask for live location, which is still mandatory:
+      // without it no session is stored, so the person is not logged in.
+      const { lat, lng, reason } = await getGeolocation();
+      if (lat == null || lng == null) {
+        const why: Record<string, string> = {
+          denied: "Location permission is blocked. Tap the lock icon next to the address bar, set Location to Allow, then try again.",
+          timeout: "Could not get your location in time. Turn on the phone's Location (GPS), move near a window or outdoors, then try again.",
+          unavailable: "Your phone could not find its location. Turn on the phone's Location (GPS) in Settings, then try again.",
+          insecure: "Location only works on a secure (https) page. Open the portal using its https address.",
+          unsupported: "This browser does not support location. Please use Chrome or Safari.",
+        };
+        return { error: `Login blocked: ${why[reason ?? "unavailable"]}` };
+      }
+
       setStaff(staffLite);
       setToken(result.token);
       localStorage.setItem(STAFF_KEY, JSON.stringify(staffLite));
