@@ -3,7 +3,6 @@ import { formatDate, formatCurrency, openPurchaseBill, lineAmounts, paymentModeL
 import { supabase, SHOP } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { StatusPill } from "../components/StatusPill";
-import { addPurchaseToInventory, describeSync } from "../lib/purchaseToInventory";
 import { PurchaseEntryModal, type PurchaseEntry } from "../components/PurchaseEntryModal";
 import { billFromEntry } from "../lib/purchaseBill";
 import { Plus, Printer, Eye } from "lucide-react";
@@ -34,7 +33,6 @@ export function WholesalerInvoices() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [inventoryNote, setInventoryNote] = useState<string | null>(null);
 
   useEffect(() => {
     load();
@@ -91,11 +89,6 @@ export function WholesalerInvoices() {
       return;
     }
     setShowForm(false);
-    if (e.addToInventory) {
-      setInventoryNote(describeSync(await addPurchaseToInventory(e.lines)));
-    } else {
-      setInventoryNote(null);
-    }
     load();
   }
 
@@ -168,13 +161,6 @@ export function WholesalerInvoices() {
           </button>
         </div>
       </div>
-
-      {inventoryNote && (
-        <div className="flex items-start justify-between gap-2 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-          <span>{inventoryNote}</span>
-          <button className="text-emerald-700/70 hover:text-emerald-900" onClick={() => setInventoryNote(null)} aria-label="Dismiss">×</button>
-        </div>
-      )}
 
       <div className="card overflow-x-auto">
         <table className="table-base">

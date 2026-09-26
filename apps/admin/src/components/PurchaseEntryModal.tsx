@@ -37,8 +37,6 @@ export interface PurchaseEntry {
   totals: PurchaseTotals;
   terms: string;
   notes: string;
-  /** Also put the bill's items into inventory (stock up existing items, create new ones). */
-  addToInventory: boolean;
 }
 
 interface Props {
@@ -84,7 +82,6 @@ export function PurchaseEntryModal({ title, partyLabel, showDueDate, shopState, 
   const [priceIncludesGst, setPriceIncludesGst] = useState(false);
   const [terms, setTerms] = useState("Thanks for doing business with us!");
   const [notes, setNotes] = useState("");
-  const [addToInventory, setAddToInventory] = useState(true);
   const [draft, setDraft] = useState<DraftLine[]>([blankLine()]);
   const [localError, setLocalError] = useState<string | null>(null);
 
@@ -161,7 +158,6 @@ export function PurchaseEntryModal({ title, partyLabel, showDueDate, shopState, 
       totals: purchaseTotals(keep),
       terms: terms.trim(),
       notes: notes.trim(),
-      addToInventory,
     };
   }
 
@@ -375,16 +371,6 @@ export function PurchaseEntryModal({ title, partyLabel, showDueDate, shopState, 
             </div>
           </div>
         </div>
-
-        <label className="flex items-start gap-2 rounded-md border border-border bg-accent/30 p-2.5 text-sm text-gray-700">
-          <input type="checkbox" className="mt-0.5 rounded border-gray-300 text-brand-primary" checked={addToInventory} onChange={(e) => setAddToInventory(e.target.checked)} />
-          <span>
-            <b>Add these items to inventory</b>
-            <span className="block text-xs text-gray-500">
-              Existing items get their stock raised (or the serials added); new items are created with this bill's price as cost. Untick for parts you only use for repairs.
-            </span>
-          </span>
-        </label>
 
         <div className="flex flex-wrap justify-end gap-2 pt-1">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
