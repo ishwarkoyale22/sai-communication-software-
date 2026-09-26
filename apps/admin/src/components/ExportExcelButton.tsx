@@ -32,6 +32,8 @@ export function ExportExcelButton<T extends Record<string, unknown>>({
 
   return (
     <>
+      {/* One wrapper so the two buttons always sit together, even inside a "justify-between" header. */}
+      <div className="inline-flex items-center gap-2">
       <button
         className="btn-secondary"
         disabled={rows.length === 0}
@@ -50,6 +52,7 @@ export function ExportExcelButton<T extends Record<string, unknown>>({
         <Download size={14} />
         Export Excel
       </button>
+      </div>
 
       {viewing && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-2 sm:p-4" onClick={() => setViewing(false)}>
