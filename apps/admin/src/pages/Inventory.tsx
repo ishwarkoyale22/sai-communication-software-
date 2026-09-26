@@ -5,6 +5,7 @@ import type { InventoryUnit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { BulkAddProductsModal } from "../components/BulkAddProductsModal";
 import { InvoiceImportModal } from "../components/InvoiceImportModal";
 import { decodeEInvoiceQr, type EInvoiceSummary } from "../lib/invoiceReader";
 
@@ -337,6 +338,7 @@ export function Inventory() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [search, setSearch] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  const [showBulkAdd, setShowBulkAdd] = useState(false);
   // Invoice import (e-invoice QR summary + item-by-item entry); summary null = opened without a QR.
   const [invoiceImport, setInvoiceImport] = useState<{ summary: EInvoiceSummary | null } | null>(null);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
@@ -1329,6 +1331,9 @@ export function Inventory() {
           >
             <Plus size={15} /> Add Product
           </button>
+          <button className="btn-secondary flex items-center gap-1.5" onClick={() => setShowBulkAdd(true)} title="Add many products in one go">
+            <Plus size={15} /> Add Multiple
+          </button>
         </div>
       </div>
 
@@ -1522,6 +1527,15 @@ export function Inventory() {
         </table>
       </div>
 
+      {showBulkAdd && (
+        <BulkAddProductsModal
+          existing={items}
+          brands={brands}
+          onClose={() => setShowBulkAdd(false)}
+          onDone={() => load()}
+        />
+      )}
+
       {invoiceImport && (
         <InvoiceImportModal
           summary={invoiceImport.summary}
@@ -1564,6 +1578,11 @@ export function Inventory() {
                       Stop Camera
                     </button>
                   </>
+                )}
+                {!invoiceScanActive && (
+                  <button type="button" className="btn-ghost mt-1.5 w-full text-xs" onClick={() => { setShowAddForm(false); setShowBulkAdd(true); }}>
+                    Adding many products? Add multiple at once
+                  </button>
                 )}
                 {!invoiceScanActive && (
                   <button type="button" className="btn-ghost mt-1.5 w-full text-xs" onClick={() => setInvoiceImport({ summary: null })}>
