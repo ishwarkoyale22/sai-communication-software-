@@ -5,6 +5,7 @@ import type { InventoryUnit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
+import { BrandCombobox } from "../components/BrandCombobox";
 import { InvoiceImportModal } from "../components/InvoiceImportModal";
 import { decodeEInvoiceQr, type EInvoiceSummary } from "../lib/invoiceReader";
 
@@ -1777,19 +1778,14 @@ export function Inventory() {
                   </select>
                 </Field>
                 <Field label="Brand">
-                  <input
-                    className="input w-full"
-                    list="brand-options"
-                    placeholder="Type or pick a brand"
-                    autoComplete="off"
+                  <BrandCombobox
+                    brands={brands}
                     value={
                       editingItem
                         ? editBrandName ?? brands.find((b) => b.id === editingItem.brand_id)?.name ?? ""
                         : form.brand_name || brands.find((b) => b.id === form.brand_id)?.name || ""
                     }
-                    onChange={(e) => {
-                      const text = e.target.value;
-                      const match = brands.find((b) => b.name.trim().toLowerCase() === text.trim().toLowerCase());
+                    onChange={(text, match) => {
                       if (editingItem) {
                         setEditBrandName(text);
                         setEditingItem({ ...editingItem, brand_id: match?.id ?? "" });
@@ -1798,11 +1794,6 @@ export function Inventory() {
                       }
                     }}
                   />
-                  <datalist id="brand-options">
-                    {brands.filter((b) => b.is_active).map((b) => (
-                      <option key={b.id} value={b.name} />
-                    ))}
-                  </datalist>
                 </Field>
               </div>
 
