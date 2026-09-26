@@ -46,7 +46,6 @@ const TECHNICIAN_LINKS: LinkDef[] = [
 ];
 
 const SALES_LINKS: LinkDef[] = [
-  { to: "/portal/new-sale", label: "New Sale", icon: ShoppingCart, tile: "card-gold", iconColor: "text-gold" },
   { to: "/portal/products", label: "Products", icon: Package, tile: "card-blue", iconColor: "text-brand-primary" },
   { to: "/portal/enquiries", label: "Enquiries", icon: MessageSquareText, tile: "card-amber", iconColor: "text-amber-600" },
   { to: "/portal/follow-ups", label: "Leads / Follow-ups", icon: CalendarClock, tile: "card-blue", iconColor: "text-brand-primary" },
@@ -70,7 +69,7 @@ const RECEPTIONIST_LINKS: LinkDef[] = [
 ];
 
 export function Home() {
-  const { staff, token, openAttendance, clockOut, todaysBirthdays, sendBirthdayWish } = useStaffAuth();
+  const { staff, token, unreadBySection, openAttendance, clockOut, todaysBirthdays, sendBirthdayWish } = useStaffAuth();
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [activity, setActivity] = useState<{ id: string; action: string; created_at: string }[]>([]);
   const [now, setNow] = useState(Date.now());
@@ -297,8 +296,13 @@ export function Home() {
             to={to}
             className={`${tile} flex flex-col items-center justify-center gap-2 p-3 transition-all hover:-translate-y-0.5 hover:shadow-cardHover`}
           >
-            <div className={`flex h-9 w-9 items-center justify-center rounded-full bg-white/70 ${iconColor}`}>
+            <div className={`relative flex h-9 w-9 items-center justify-center rounded-full bg-white/70 ${iconColor}`}>
               <Icon size={17} strokeWidth={1.75} />
+              {(unreadBySection[to] ?? 0) > 0 && (
+                <span className="absolute -right-2 -top-2 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white shadow">
+                  {unreadBySection[to] > 9 ? "9+" : unreadBySection[to]}
+                </span>
+              )}
             </div>
             <span className="text-center text-[11px] font-medium text-gray-700">{label}</span>
           </Link>

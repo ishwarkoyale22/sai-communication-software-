@@ -4,6 +4,7 @@ import { IndianRupee, Package, Wrench, ShoppingBag, Receipt, TrendingUp, Boxes, 
 import { formatCurrency, formatDateTime, computePaymentSplit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { StatusPill } from "../components/StatusPill";
+import { GiftsOverview } from "../components/GiftsOverview";
 
 type Period = "day" | "week" | "month" | "year";
 
@@ -456,6 +457,8 @@ export function Dashboard() {
               return c.to ? <Link key={c.label} to={c.to}>{Card}</Link> : <div key={c.label}>{Card}</div>;
             })}
       </div>
+
+      <GiftsOverview period={period} since={periodStart(period)} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="card p-4">

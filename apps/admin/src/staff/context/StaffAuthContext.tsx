@@ -6,6 +6,31 @@ import { wipeFetchCache } from "@sai/shared";
 const STAFF_KEY = "sai_staff_session";
 const TOKEN_KEY = "sai_staff_token";
 
+// Which portal section a notification belongs to (for per-tile badges).
+const TYPE_SECTION: Record<string, string> = {
+  task_assigned: "/portal/tasks",
+  follow_up_reminder: "/portal/follow-ups",
+  leave_approved: "/portal/leave",
+  leave_rejected: "/portal/leave",
+  leave_submitted: "/portal/leave",
+  report_approved: "/portal/reports",
+  report_rejected: "/portal/reports",
+  changes_required: "/portal/reports",
+  enquiry_new: "/portal/enquiries",
+  review_new: "/portal/reviews",
+  repair_assigned: "/portal/repairs",
+  repair_completed: "/portal/repairs",
+  repair_request_new: "/portal/repairs",
+  website_order_new: "/portal/orders",
+  product_sold: "/portal/sales-history",
+  finance_status_update: "/portal/finance-reports",
+  finance_report_uploaded: "/portal/finance-reports",
+  finance_application_new: "/portal/finance-reports",
+};
+function sectionFor(type: string, link: string | null): string | null {
+  return TYPE_SECTION[type] ?? (link && link.startsWith("/portal/") ? link.split("?")[0] : null);
+}
+
 export interface StaffLite {
   id: string;
   name: string;
@@ -38,6 +63,7 @@ interface StaffAuthState {
   openAttendance: Attendance | null;
   todaysBirthdays: BirthdayEntry[];
   unreadNotifications: number;
+  unreadBySection: Record<string, number>;
   loading: boolean;
   loginWithPin: (phone: string, pin: string, expectedRole?: string) => Promise<{ error?: string; staff?: StaffLite }>;
   updateStaffName: (name: string) => void;
@@ -57,6 +83,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
   const [openAttendance, setOpenAttendance] = useState<Attendance | null>(null);
   const [todaysBirthdays, setTodaysBirthdays] = useState<BirthdayEntry[]>([]);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [unreadBySection, setUnreadBySection] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -152,7 +179,14 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       endExpiredSession();
       return;
     }
-    setUnreadNotifications(((data as { is_read: boolean }[]) ?? []).filter((n) => !n.is_read).length);
+    const unread = ((data as { is_read: boolean; type: string; link: string | null }[]) ?? []).filter((n) => !n.is_read);
+    setUnreadNotifications(unread.length);
+    const by: Record<string, number> = {};
+    for (const n of unread) {
+      const path = sectionFor(n.type, n.link);
+      if (path) by[path] = (by[path] ?? 0) + 1;
+    }
+    setUnreadBySection(by);
   }
 
   async function refreshNotifications() {
@@ -169,12 +203,16 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
 
     // Live location is mandatory: ask for it BEFORE anything else, so a staff
     // member who blocks it never gets a session at all.
-    const { lat, lng } = await getGeolocation();
+    const { lat, lng, reason } = await getGeolocation();
     if (lat == null || lng == null) {
-      return {
-        error:
-          "Login blocked: please turn on live location and tap Allow when your browser asks. If you blocked it earlier, click the lock icon next to the address bar, set Location to Allow, then try again.",
+      const why: Record<string, string> = {
+        denied: "Location permission is blocked. Tap the lock icon next to the address bar, set Location to Allow, then try again.",
+        timeout: "Could not get your location in time. Turn on the phone's Location (GPS), move near a window or outdoors, then try again.",
+        unavailable: "Your phone could not find its location. Turn on the phone's Location (GPS) in Settings, then try again.",
+        insecure: "Location only works on a secure (https) page. Open the portal using its https address.",
+        unsupported: "This browser does not support location. Please use Chrome or Safari.",
       };
+      return { error: `Login blocked: ${why[reason ?? "unavailable"]}` };
     }
 
     try {
@@ -278,6 +316,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         openAttendance,
         todaysBirthdays,
         unreadNotifications,
+        unreadBySection,
         loading,
         loginWithPin,
         updateStaffName,

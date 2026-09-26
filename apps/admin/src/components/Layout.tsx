@@ -2,6 +2,7 @@ import { markNavigation } from "@sai/shared";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { SmoothScroll } from "./SmoothScroll";
+import { supabase } from "../lib/supabase";
 import {
   LayoutDashboard,
   Package,
@@ -116,6 +117,50 @@ export function Layout() {
   const bumpedThisVisit = useRef(false);
   const mainRef = useRef<HTMLElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
+
+  // Unread admin notifications counted per sidebar section (by the path in
+  // each notification's link). Opening a section marks its alerts as read.
+  const [unreadByPath, setUnreadByPath] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let alive = true;
+    async function loadUnread() {
+      const { data } = await supabase
+        .from("notifications")
+        .select("id, link")
+        .eq("for_admin", true)
+        .eq("is_read", false)
+        .not("link", "is", null);
+      if (!alive) return;
+      const by: Record<string, number> = {};
+      for (const n of (data as { link: string }[]) ?? []) {
+        const path = n.link.split("?")[0];
+        by[path] = (by[path] ?? 0) + 1;
+      }
+      setUnreadByPath(by);
+    }
+    loadUnread();
+    const channel = supabase
+      .channel("admin-sidebar-badges")
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: "for_admin=eq.true" }, loadUnread)
+      .subscribe();
+    return () => {
+      alive = false;
+      supabase.removeChannel(channel);
+    };
+  }, []);
+  useEffect(() => {
+    const path = location.pathname;
+    if (!unreadByPath[path]) return;
+    setUnreadByPath((prev) => ({ ...prev, [path]: 0 }));
+    supabase
+      .from("notifications")
+      .update({ is_read: true })
+      .eq("for_admin", true)
+      .eq("is_read", false)
+      .like("link", `${path}%`)
+      .then(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname, unreadByPath]);
 
   // Close the drawer automatically on navigation, so tapping a link doesn't
   // leave the overlay sitting open behind the new page.
@@ -240,7 +285,12 @@ export function Layout() {
                         <span className="pointer-events-none absolute inset-x-0 top-0 h-1/2 rounded-t-md bg-gradient-to-b from-white/40 to-transparent" />
                       )}
                       <Icon size={16} className="relative" />
-                      <span className="relative">{label}</span>
+                      <span className="relative flex-1">{label}</span>
+                      {(unreadByPath[to] ?? 0) > 0 && (
+                        <span className="relative flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-[11px] font-bold text-white shadow">
+                          {unreadByPath[to] > 99 ? "99+" : unreadByPath[to]}
+                        </span>
+                      )}
                     </>
                   )}
                 </NavLink>

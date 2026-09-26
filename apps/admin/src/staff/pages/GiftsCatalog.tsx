@@ -31,7 +31,7 @@ export function GiftsCatalog() {
   return (
     <div className="space-y-4">
       <h1 className="text-lg font-semibold text-gray-800">Gifts</h1>
-      <p className="text-xs text-gray-500">Sell a gift from New Sale — this is just the catalog.</p>
+      <p className="text-xs text-gray-500">This is the gift catalog.</p>
       {loading ? (
         <div className="text-center text-sm text-gray-400">Loading…</div>
       ) : gifts.length === 0 ? (

@@ -70,7 +70,6 @@ const StaffNotifications = lazy(() => import("./staff/pages/Notifications").then
 const StaffProfile = lazy(() => import("./staff/pages/Profile").then((m) => ({ default: m.Profile })));
 const StaffFinanceReports = lazy(() => import("./staff/pages/FinanceReports").then((m) => ({ default: m.FinanceReports })));
 // Role-portal additions (Sales / Receptionist) — Technician reuses StaffRepairs/StaffTasks/etc above.
-const StaffNewSale = lazy(() => import("./staff/pages/NewSale").then((m) => ({ default: m.NewSale })));
 const StaffProducts = lazy(() => import("./staff/pages/ProductsView").then((m) => ({ default: m.ProductsView })));
 const StaffOffers = lazy(() => import("./staff/pages/OffersView").then((m) => ({ default: m.OffersView })));
 const StaffGiftsCatalog = lazy(() => import("./staff/pages/GiftsCatalog").then((m) => ({ default: m.GiftsCatalog })));
@@ -207,7 +206,8 @@ export default function App() {
                 <Route path="/portal/profile" element={<StaffProfile />} />
 
                 {/* Sales Person */}
-                <Route path="/portal/new-sale" element={<RequireStaffRole role="sales"><StaffNewSale /></RequireStaffRole>} />
+                {/* New Sale was removed from the salesperson portal; keep old links/bookmarks working. */}
+                <Route path="/portal/new-sale" element={<Navigate to="/portal" replace />} />
                 <Route path="/portal/products" element={<RequireStaffRole role="sales"><StaffProducts /></RequireStaffRole>} />
                 <Route path="/portal/offers" element={<RequireStaffRole role="sales"><StaffOffers /></RequireStaffRole>} />
                 <Route path="/portal/gifts-catalog" element={<RequireStaffRole role="sales"><StaffGiftsCatalog /></RequireStaffRole>} />
