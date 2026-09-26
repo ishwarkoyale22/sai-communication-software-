@@ -1034,14 +1034,31 @@ export function Inventory() {
   }
 
   // Put the filled-in form on the waiting list and give a fresh form for the next product.
-  function queueAnother() {
+  function queueAnother(copyDetails = false) {
     if (!form.name.trim() || !form.model.trim()) {
       setError("Product name and model are required before adding another product.");
       return;
     }
     setError(null);
     setQueue((q) => [...q, form]);
-    setForm(emptyForm);
+    // "Copy details" keeps brand, category, RAM/storage/colour, prices etc. so a variant only needs what differs.
+    setForm(copyDetails ? { ...form, serials: "" } : emptyForm);
+    document.getElementById("add-product-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function queueSummary(q: typeof emptyForm) {
+    const bits = [q.model && q.model !== q.name ? q.model : "", q.ram.join("/"), q.storage.join("/"), q.color.join("/"), q.stock ? `${q.stock} pcs` : ""].filter(Boolean);
+    return bits.join(" · ");
+  }
+
+  // Pull a waiting product back into the form to change it (whatever is in the form joins the list).
+  function editQueued(i: number) {
+    const picked = queue[i];
+    setQueue((all) => {
+      const rest = all.filter((_, j) => j !== i);
+      return form.name.trim() || form.model.trim() ? [...rest, form] : rest;
+    });
+    setForm(picked);
     document.getElementById("add-product-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1621,14 +1638,17 @@ export function Inventory() {
                 <div className="mb-1 text-xs font-semibold text-emerald-700">
                   {queue.length} product{queue.length === 1 ? "" : "s"} ready to save — fill in the next one below
                 </div>
-                <div className="flex flex-wrap gap-1.5">
+                <div className="space-y-1">
                   {queue.map((q, i) => (
-                    <span key={i} className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs text-gray-700">
-                      {i + 1}. {q.name}
+                    <div key={i} className="flex items-center justify-between gap-2 rounded-md border border-emerald-200 bg-white px-2 py-1 text-xs text-gray-700">
+                      <button type="button" className="min-w-0 flex-1 truncate text-left" onClick={() => editQueued(i)} title="Tap to edit this product">
+                        <b>{i + 1}. {q.name}</b>
+                        {queueSummary(q) && <span className="text-gray-400"> — {queueSummary(q)}</span>}
+                      </button>
                       <button type="button" className="text-gray-400 hover:text-brand-danger" aria-label={`Remove ${q.name}`} onClick={() => setQueue((all) => all.filter((_, j) => j !== i))}>
                         ×
                       </button>
-                    </span>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -2018,9 +2038,14 @@ export function Inventory() {
                 Cancel
               </button>
               {!editingItem && (
-                <button type="button" className="btn-secondary" onClick={queueAnother} disabled={saving}>
-                  + Add another product
-                </button>
+                <>
+                  <button type="button" className="btn-secondary" onClick={() => queueAnother(true)} disabled={saving} title="Keep brand, RAM, storage, colour and prices — change only what differs">
+                    + Same details, next
+                  </button>
+                  <button type="button" className="btn-secondary" onClick={() => queueAnother(false)} disabled={saving}>
+                    + Add another product
+                  </button>
+                </>
               )}
               <button type="button" className="btn-primary" onClick={editingItem ? saveEditedItem : addItem} disabled={saving}>
                 {saving ? "Saving..." : !editingItem && queue.length > 0 ? `Save all (${queue.length + (form.name.trim() || form.model.trim() ? 1 : 0)})` : "Save"}
