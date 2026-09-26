@@ -56,7 +56,12 @@ const HSN_HINTS: Record<string, { code?: string; rate?: number; note: string }> 
   Accessories: { note: "Varies: chargers 8504, cables 8544, earphones 8518, cases 3926/4202, power banks 8507" },
   "Home Appliances": { note: "Varies by product — check the HSN on the supplier's invoice" },
 };
-const GST_RATE_CHOICES = [0, 5, 12, 18, 28];
+const GST_RATE_CHOICES = [0, 5, 12, 18, 28, 40];
+// Rate that goes with an HSN heading (first 4 digits) — used to fill the GST rate as soon as an HSN is typed.
+const HSN_RATE_BY_HEADING: Record<string, number> = {
+  "8517": 18, "8471": 18, "8504": 18, "8544": 18, "8518": 18, "8507": 18, "8528": 18, "8509": 18,
+  "8418": 18, "8450": 18, "8415": 18, "8516": 18, "3926": 18, "4202": 18, "8523": 18, "8525": 18,
+};
 
 const emptyForm = {
   hsn_sac: "",
@@ -356,6 +361,7 @@ export function Inventory() {
   const [search, setSearch] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   // Products filled in and waiting; "Save" adds these plus whatever is in the form.
+  const [gstCustom, setGstCustom] = useState(false); // GST rate typed by hand instead of picked
   const [editBrandName, setEditBrandName] = useState<string | null>(null);
   const [queue, setQueue] = useState<(typeof emptyForm)[]>([]);
   // Invoice import (e-invoice QR summary + item-by-item entry); summary null = opened without a QR.
@@ -529,6 +535,7 @@ export function Inventory() {
     if (editingItem) setEditingItem(null);
     else setShowAddForm(false);
     setQueue([]);
+    setGstCustom(false);
   }
 
   // Cross-column duplicate check against ALL existing units in this shop's
@@ -1063,6 +1070,7 @@ export function Inventory() {
     setQueue((q) => [...q, form]);
     // "Copy details" keeps brand, category, RAM/storage/colour, prices etc. so a variant only needs what differs.
     setForm(copyDetails ? { ...form, serials: "" } : emptyForm);
+    if (!copyDetails) setGstCustom(false);
     document.getElementById("add-product-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -1198,6 +1206,7 @@ export function Inventory() {
 
       setQueue([]);
       setForm(emptyForm);
+      setGstCustom(false);
       setShowAddForm(false);
       await stopScanner();
       setSuccess(toSave.length > 1 ? `${toSave.length} products added successfully!` : "Item added successfully!");
@@ -1946,25 +1955,61 @@ export function Inventory() {
                       value={editingItem ? editingItem.hsn_sac ?? "" : form.hsn_sac}
                       onChange={(e) => {
                         const v = e.target.value.replace(/[^\d]/g, "").slice(0, 8);
-                        editingItem ? setEditingItem({ ...editingItem, hsn_sac: v }) : setForm({ ...form, hsn_sac: v });
+                        const auto = v.length >= 4 ? HSN_RATE_BY_HEADING[v.slice(0, 4)] : undefined;
+                        if (editingItem) {
+                          setEditingItem({ ...editingItem, hsn_sac: v, ...(auto != null && editingItem.gst_rate == null ? { gst_rate: auto } : {}) });
+                        } else {
+                          setForm({ ...form, hsn_sac: v, ...(auto != null && form.gst_rate === "" ? { gst_rate: String(auto) } : {}) });
+                        }
                       }}
                     />
                   </Field>
                   <Field label="GST rate">
-                    <select
-                      className="input w-full"
-                      value={editingItem ? (editingItem.gst_rate == null ? "" : String(editingItem.gst_rate)) : form.gst_rate}
-                      onChange={(e) =>
+                    {(() => {
+                      const cur = editingItem ? (editingItem.gst_rate == null ? "" : String(editingItem.gst_rate)) : form.gst_rate;
+                      const setRate = (v: string) =>
                         editingItem
-                          ? setEditingItem({ ...editingItem, gst_rate: e.target.value === "" ? null : Number(e.target.value) })
-                          : setForm({ ...form, gst_rate: e.target.value })
-                      }
-                    >
-                      <option value="">Not set (use sale default)</option>
-                      {GST_RATE_CHOICES.map((r) => (
-                        <option key={r} value={String(r)}>{r}%</option>
-                      ))}
-                    </select>
+                          ? setEditingItem({ ...editingItem, gst_rate: v === "" ? null : Number(v) })
+                          : setForm({ ...form, gst_rate: v });
+                      const custom = gstCustom || (cur !== "" && !GST_RATE_CHOICES.includes(Number(cur)));
+                      return (
+                        <div className="flex gap-1.5">
+                          <select
+                            className="input w-full"
+                            value={custom ? "custom" : cur}
+                            onChange={(e) => {
+                              if (e.target.value === "custom") {
+                                setGstCustom(true);
+                              } else {
+                                setGstCustom(false);
+                                setRate(e.target.value);
+                              }
+                            }}
+                          >
+                            <option value="">Not set (use sale default)</option>
+                            {GST_RATE_CHOICES.map((r) => (
+                              <option key={r} value={String(r)}>{r}%</option>
+                            ))}
+                            <option value="custom">Other rate…</option>
+                          </select>
+                          {custom && (
+                            <div className="relative w-24 shrink-0">
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                step="0.01"
+                                className="input w-full pr-5"
+                                placeholder="Rate"
+                                value={cur}
+                                onChange={(e) => setRate(e.target.value)}
+                              />
+                              <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-400">%</span>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </Field>
                 </div>
                 {(() => {
