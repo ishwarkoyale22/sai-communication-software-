@@ -5,6 +5,8 @@ import type { InventoryUnit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
 import { Html5Qrcode } from "html5-qrcode";
+import { InvoiceImportModal } from "../components/InvoiceImportModal";
+import { decodeEInvoiceQr, type EInvoiceSummary } from "../lib/invoiceReader";
 
 import { uploadProductImage } from "../lib/uploadImage";
 
@@ -335,6 +337,8 @@ export function Inventory() {
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [search, setSearch] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
+  // Invoice import (e-invoice QR summary + item-by-item entry); summary null = opened without a QR.
+  const [invoiceImport, setInvoiceImport] = useState<{ summary: EInvoiceSummary | null } | null>(null);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [editingCell, setEditingCell] = useState<{ id: string; field: "price" | "stock" } | null>(null);
@@ -948,8 +952,16 @@ export function Inventory() {
   }
 
   async function onInvoiceScanDecoded(text: string) {
-    const parsed = parseInvoiceQrPayload(text);
     await stopInvoiceScanner();
+
+    // Government e-invoice QR: only a summary (no item list) — hand over to the item-by-item import.
+    const einvoice = decodeEInvoiceQr(text);
+    if (einvoice) {
+      setInvoiceImport({ summary: einvoice });
+      setInvoiceScanFeedback(null);
+      return;
+    }
+    const parsed = parseInvoiceQrPayload(text);
 
     // If this exact product is already in inventory, don't offer to create
     // a duplicate — point the user at restocking the existing one instead
@@ -1504,6 +1516,15 @@ export function Inventory() {
         </table>
       </div>
 
+      {invoiceImport && (
+        <InvoiceImportModal
+          summary={invoiceImport.summary}
+          existing={items}
+          onClose={() => setInvoiceImport(null)}
+          onDone={() => load()}
+        />
+      )}
+
       {(showAddForm || editingItem) && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
           <div className="card w-full max-w-md p-6 shadow-xl animate-in fade-in zoom-in duration-150">
@@ -1537,6 +1558,11 @@ export function Inventory() {
                       Stop Camera
                     </button>
                   </>
+                )}
+                {!invoiceScanActive && (
+                  <button type="button" className="btn-ghost mt-1.5 w-full text-xs" onClick={() => setInvoiceImport({ summary: null })}>
+                    Add several items from an invoice (PDF / photo / by hand)
+                  </button>
                 )}
                 {invoiceScanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{invoiceScanFeedback}</p>}
               </div>
