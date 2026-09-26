@@ -850,6 +850,94 @@ export function Sales() {
     if (typeFilter !== "all" && s.sale_type !== typeFilter) return false;
     return true;
   });
+  // Full invoice detail for the Excel view / export: one row per invoice line (items, hampers and gifts), with the
+  // invoice, customer, tax and payment details repeated on each row. Empty text shows as "-" so nothing looks missing.
+  const [detailRows, setDetailRows] = useState<Record<string, unknown>[]>([]);
+  const filteredKey = filtered.map((s) => s.id).join(",");
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const ids = filtered.map((s) => s.id);
+      const itemsBySale = new Map<string, any[]>();
+      for (let n = 0; n < ids.length; n += 100) {
+        const chunk = ids.slice(n, n + 100);
+        const [items, gifts] = await Promise.all([
+          supabase.from("sales_items").select("sale_id, item_name, quantity, total_price, serial_no, hsn_sac, gst_rate").in("sale_id", chunk),
+          supabase.from("gift_sales").select("sale_id, quantity, unit_price, gifts(name)").in("sale_id", chunk),
+        ]);
+        for (const it of (items.data as any[]) ?? []) {
+          (itemsBySale.get(it.sale_id) ?? itemsBySale.set(it.sale_id, []).get(it.sale_id)!).push({
+            name: it.item_name, qty: it.quantity, total: Number(it.total_price) || 0, serial: it.serial_no, hsn: it.hsn_sac, rate: it.gst_rate,
+          });
+        }
+        for (const g of (gifts.data as any[]) ?? []) {
+          (itemsBySale.get(g.sale_id) ?? itemsBySale.set(g.sale_id, []).get(g.sale_id)!).push({
+            name: `${g.gifts?.name ?? "Gift"} (gift)`, qty: g.quantity, total: (Number(g.unit_price) || 0) * (Number(g.quantity) || 0), serial: null, hsn: null, rate: null,
+          });
+        }
+      }
+      if (!alive) return;
+      const t = (v: unknown) => (v == null || String(v).trim() === "" ? "-" : v);
+      const r2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+      const rows: Record<string, unknown>[] = [];
+      for (const sale of filtered) {
+        const lines = itemsBySale.get(sale.id) ?? [];
+        const received = sale.amount_received ?? (sale.payment_status === "paid" ? sale.final_amount : 0);
+        const head = {
+          "Invoice No": sale.invoice_number,
+          "Invoice Date": sale.invoice_date ?? sale.created_at?.slice(0, 10),
+          "Created At": sale.created_at,
+          Type: sale.sale_type,
+          Customer: t(sale.customer_name),
+          Phone: t(sale.customer_phone),
+          GSTIN: t(sale.customer_gstin),
+          Address: t(sale.customer_address),
+          State: t(sale.customer_state),
+        };
+        const tail = {
+          "Invoice Subtotal": sale.total_amount,
+          Discount: sale.discount,
+          "Invoice Total": sale.final_amount,
+          "Payment Mode": t(sale.payment_method),
+          "Payment Status": t(sale.payment_status),
+          Received: received,
+          Balance: r2(sale.final_amount - received),
+          Notes: t(sale.notes),
+          Terms: t(sale.terms),
+        };
+        if (lines.length === 0) {
+          rows.push({ ...head, "Item #": "-", Item: "-", "HSN/SAC": "-", "Serial / IMEI": "-", Qty: "-", "Price/Unit (ex-GST)": "-", "GST %": "-", "Taxable Value": "-", "GST Amount": "-", CGST: "-", SGST: "-", "Line Amount": "-", ...tail });
+          continue;
+        }
+        lines.forEach((l, idx) => {
+          const rate = Number(l.rate ?? sale.gst_rate ?? 18);
+          const taxable = r2(l.total / (1 + rate / 100));
+          const gst = r2(l.total - taxable);
+          rows.push({
+            ...head,
+            "Item #": idx + 1,
+            Item: t(l.name),
+            "HSN/SAC": t(l.hsn),
+            "Serial / IMEI": t(l.serial),
+            Qty: l.qty,
+            "Price/Unit (ex-GST)": l.qty ? r2(taxable / l.qty) : taxable,
+            "GST %": rate,
+            "Taxable Value": taxable,
+            "GST Amount": gst,
+            CGST: r2(gst / 2),
+            SGST: r2(gst / 2),
+            "Line Amount": r2(l.total),
+            ...tail,
+          });
+        });
+      }
+      setDetailRows(rows);
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredKey]);
   const typeCount = (t: "website" | "in_store") => sales.filter((s) => s.sale_type === t).length;
 
   return (
@@ -858,14 +946,7 @@ export function Sales() {
         <h1 className="text-lg font-semibold text-gray-800">Sales & Invoices</h1>
         <div className="flex gap-2">
           <ExportExcelButton
-            rows={filtered.map((s) => ({
-              Invoice: s.invoice_number,
-              Customer: s.customer_name,
-              Type: s.sale_type,
-              Total: s.final_amount,
-              Payment: `${s.payment_method} (${s.payment_status})`,
-              Date: s.created_at,
-            }))}
+            rows={detailRows}
             fileName="sales"
           />
           <button className="btn-primary" onClick={() => setShowForm(true)}>
