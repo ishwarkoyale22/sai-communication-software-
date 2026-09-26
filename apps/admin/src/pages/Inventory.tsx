@@ -339,6 +339,8 @@ export function Inventory() {
   const [search, setSearch] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   const [showBulkAdd, setShowBulkAdd] = useState(false);
+  // Products filled in and waiting; "Save" adds these plus whatever is in the form.
+  const [queue, setQueue] = useState<(typeof emptyForm)[]>([]);
   // Invoice import (e-invoice QR summary + item-by-item entry); summary null = opened without a QR.
   const [invoiceImport, setInvoiceImport] = useState<{ summary: EInvoiceSummary | null } | null>(null);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
@@ -508,6 +510,7 @@ export function Inventory() {
     setInvoiceScanFeedback(null);
     if (editingItem) setEditingItem(null);
     else setShowAddForm(false);
+    setQueue([]);
   }
 
   // Cross-column duplicate check against ALL existing units in this shop's
@@ -1032,8 +1035,76 @@ export function Inventory() {
     );
   }
 
-  async function addItem() {
+  // Put the filled-in form on the waiting list and give a fresh form for the next product.
+  function queueAnother() {
     if (!form.name.trim() || !form.model.trim()) {
+      setError("Product name and model are required before adding another product.");
+      return;
+    }
+    setError(null);
+    setQueue((q) => [...q, form]);
+    setForm(emptyForm);
+    document.getElementById("add-product-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  async function insertProduct(f: typeof emptyForm, actorName: string) {
+    const serials = f.is_serialized ? parseSerials(f.serials) : [];
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from("inventory")
+      .insert({
+        name: f.name.trim(),
+        model: f.model.trim(),
+        category: f.category,
+        brand_id: f.brand_id || null,
+        product_type: f.product_type,
+        price: minVariantPrice(f.variant_prices) ?? (Number(f.price) || 0),
+        original_price: Number(f.original_price) || null,
+        // Serialized items derive stock from inventory_units (via trigger)
+        // — 0 here is just the starting point until serials are inserted below.
+        stock: f.is_serialized ? 0 : Number(f.stock) || 0,
+        condition: f.product_type === "refurbished" ? f.condition || null : null,
+        grade: f.product_type === "refurbished" ? f.grade || null : null,
+        battery_health: f.product_type === "refurbished" ? Number(f.battery_health) || null : null,
+        warranty_months: Number(f.warranty_months) || 0,
+        is_featured: f.is_featured,
+        images: f.images,
+        is_active: true,
+        cost_price: Number(f.cost_price) || null,
+        is_serialized: f.is_serialized,
+        specs: buildSpecs(f.ram, f.storage, f.color, f.variant_prices),
+      })
+      .select("id")
+      .single();
+
+    if (insertErr) throw insertErr;
+
+    if (serials.length > 0) {
+      const { error: unitsErr } = await supabase.from("inventory_units").insert(
+        serials.map((serial_no) => ({ inventory_id: inserted.id, serial_no }))
+      );
+      if (unitsErr) throw unitsErr;
+    }
+
+    // Best-effort — the admin bell should reflect this, but a failed
+    // notification insert must never fail the product add itself.
+    await supabase.from("notifications").insert({
+      for_admin: true,
+      type: "product_added",
+      title: "New Product Added",
+      body: `${f.name.trim()} added by ${actorName}.`,
+      related_id: inserted.id,
+      link: "/inventory",
+    });
+  }
+
+  async function addItem() {
+    const currentFilled = !!(form.name.trim() || form.model.trim());
+    if (currentFilled && (!form.name.trim() || !form.model.trim())) {
+      setError("Product name and model are required.");
+      return;
+    }
+    if (!currentFilled && queue.length === 0) {
       setError("Product name and model are required.");
       return;
     }
@@ -1050,60 +1121,31 @@ export function Inventory() {
         return;
       }
 
-      const serials = form.is_serialized ? parseSerials(form.serials) : [];
-
-      const { data: inserted, error: insertErr } = await supabase
-        .from("inventory")
-        .insert({
-          name: form.name.trim(),
-          model: form.model.trim(),
-          category: form.category,
-          brand_id: form.brand_id || null,
-          product_type: form.product_type,
-          price: minVariantPrice(form.variant_prices) ?? (Number(form.price) || 0),
-          original_price: Number(form.original_price) || null,
-          // Serialized items derive stock from inventory_units (via trigger)
-          // — 0 here is just the starting point until serials are inserted below.
-          stock: form.is_serialized ? 0 : Number(form.stock) || 0,
-          condition: form.product_type === "refurbished" ? form.condition || null : null,
-          grade: form.product_type === "refurbished" ? form.grade || null : null,
-          battery_health: form.product_type === "refurbished" ? Number(form.battery_health) || null : null,
-          warranty_months: Number(form.warranty_months) || 0,
-          is_featured: form.is_featured,
-          images: form.images,
-          is_active: true,
-          cost_price: Number(form.cost_price) || null,
-          is_serialized: form.is_serialized,
-          specs: buildSpecs(form.ram, form.storage, form.color, form.variant_prices),
-        })
-        .select("id")
-        .single();
-
-      if (insertErr) throw insertErr;
-
-      if (serials.length > 0) {
-        const { error: unitsErr } = await supabase.from("inventory_units").insert(
-          serials.map((serial_no) => ({ inventory_id: inserted.id, serial_no }))
-        );
-        if (unitsErr) throw unitsErr;
+      const actorName = session.user.email?.split("@")[0] ?? "Admin";
+      const toSave = [...queue, ...(currentFilled ? [form] : [])];
+      let saved = 0;
+      try {
+        for (const f of toSave) {
+          await insertProduct(f, actorName);
+          saved++;
+        }
+      } catch (err: any) {
+        // Keep what did not save so nothing typed is lost; drop what did.
+        const failed = toSave[saved];
+        const remaining = toSave.slice(saved);
+        setQueue(remaining.slice(0, Math.max(0, remaining.length - (currentFilled ? 1 : 0))));
+        if (currentFilled) setForm(remaining[remaining.length - 1]);
+        else if (remaining.length) { setQueue(remaining.slice(1)); setForm(remaining[0]); }
+        setError(`"${failed.name.trim()}" could not be saved${saved ? ` (${saved} saved before it)` : ""}: ${err?.message || "unknown error"}`);
+        if (saved) await load();
+        return;
       }
 
-      // Best-effort — the admin bell should reflect this, but a failed
-      // notification insert must never fail the product add itself.
-      const actorName = session.user.email?.split("@")[0] ?? "Admin";
-      await supabase.from("notifications").insert({
-        for_admin: true,
-        type: "product_added",
-        title: "New Product Added",
-        body: `${form.name.trim()} added by ${actorName}.`,
-        related_id: inserted.id,
-        link: "/inventory",
-      });
-
+      setQueue([]);
       setForm(emptyForm);
       setShowAddForm(false);
       await stopScanner();
-      setSuccess("Item added successfully!");
+      setSuccess(toSave.length > 1 ? `${toSave.length} products added successfully!` : "Item added successfully!");
       setTimeout(() => setSuccess(null), 4000);
       await load();
     } catch (err: any) {
@@ -1593,7 +1635,25 @@ export function Inventory() {
               </div>
             )}
 
-            <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            {!editingItem && queue.length > 0 && (
+              <div className="mb-3 rounded-md border border-emerald-200 bg-emerald-50/60 p-2.5">
+                <div className="mb-1 text-xs font-semibold text-emerald-700">
+                  {queue.length} product{queue.length === 1 ? "" : "s"} ready to save — fill in the next one below
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {queue.map((q, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-xs text-gray-700">
+                      {i + 1}. {q.name}
+                      <button type="button" className="text-gray-400 hover:text-brand-danger" aria-label={`Remove ${q.name}`} onClick={() => setQueue((all) => all.filter((_, j) => j !== i))}>
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div id="add-product-scroll" className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
               <Field label="Product Name *">
                 <input
                   className="input w-full"
@@ -1976,8 +2036,13 @@ export function Inventory() {
               >
                 Cancel
               </button>
+              {!editingItem && (
+                <button type="button" className="btn-secondary" onClick={queueAnother} disabled={saving}>
+                  + Add another product
+                </button>
+              )}
               <button type="button" className="btn-primary" onClick={editingItem ? saveEditedItem : addItem} disabled={saving}>
-                {saving ? "Saving..." : "Save"}
+                {saving ? "Saving..." : !editingItem && queue.length > 0 ? `Save all (${queue.length + (form.name.trim() || form.model.trim() ? 1 : 0)})` : "Save"}
               </button>
             </div>
           </div>
