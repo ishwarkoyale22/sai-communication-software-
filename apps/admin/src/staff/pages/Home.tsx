@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Clock, LogOut, Users, FileText, ListChecks, CalendarClock, Star, History, CalendarDays, Wrench, Wallet,
-  PartyPopper, X, ShoppingCart, Package, MessageSquareText, Tag, Gift, ShoppingBag, Receipt, Target, UserPlus,
+  PartyPopper, X, Package, MessageSquareText, Tag, Gift, ShoppingBag, Receipt, Target, UserPlus,
 } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
