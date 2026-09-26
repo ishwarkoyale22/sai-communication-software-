@@ -1592,8 +1592,8 @@ export function Inventory() {
 
       {(showAddForm || editingItem) && (
         <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
-          <div className="card w-full max-w-md p-6 shadow-xl animate-in fade-in zoom-in duration-150">
-            <div className="mb-4 flex items-center justify-between border-b border-border pb-3">
+          <div className="card flex max-h-[calc(100vh-2rem)] w-full max-w-md flex-col p-6 shadow-xl animate-in fade-in zoom-in duration-150">
+            <div className="mb-4 flex shrink-0 items-center justify-between border-b border-border pb-3">
               <h2 className="text-base font-semibold text-gray-800">{editingItem ? "Edit Product" : "Add New Product"}</h2>
               <button
                 onClick={closeAddOrEditForm}
@@ -1654,7 +1654,7 @@ export function Inventory() {
               </div>
             )}
 
-            <div id="add-product-scroll" className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+            <div id="add-product-scroll" className="min-h-[9rem] flex-1 space-y-3 overflow-y-auto pr-1">
               <Field label="Product Name *">
                 <input
                   className="input w-full"
@@ -2028,7 +2028,7 @@ export function Inventory() {
               </label>
             </div>
 
-            <div className="mt-4 flex justify-end gap-2 border-t border-border pt-3">
+            <div className="mt-4 flex shrink-0 flex-wrap justify-end gap-2 border-t border-border pt-3">
               <button
                 type="button"
                 className="btn-ghost"
