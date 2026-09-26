@@ -47,6 +47,7 @@ const emptyForm = {
   name: "",
   category: "Smartphones",
   brand_id: "",
+  brand_name: "", // brand as typed; matched to an existing brand at save, or created if new
   model: "",
   product_type: "new" as "new" | "refurbished",
   price: 0,
@@ -338,10 +339,12 @@ export function Inventory() {
   const [search, setSearch] = useState("");
   const [showAddForm, setShowAddForm] = useState(false);
   // Products filled in and waiting; "Save" adds these plus whatever is in the form.
+  const [editBrandName, setEditBrandName] = useState<string | null>(null);
   const [queue, setQueue] = useState<(typeof emptyForm)[]>([]);
   // Invoice import (e-invoice QR summary + item-by-item entry); summary null = opened without a QR.
   const [invoiceImport, setInvoiceImport] = useState<{ summary: EInvoiceSummary | null } | null>(null);
   const [editingItem, setEditingItem] = useState<InventoryItem | null>(null);
+  useEffect(() => setEditBrandName(null), [editingItem?.id]);
   const [form, setForm] = useState(emptyForm);
   const [editingCell, setEditingCell] = useState<{ id: string; field: "price" | "stock" } | null>(null);
   const [brands, setBrands] = useState<Brand[]>([]);
@@ -1047,7 +1050,7 @@ export function Inventory() {
   }
 
   function queueSummary(q: typeof emptyForm) {
-    const bits = [q.model && q.model !== q.name ? q.model : "", q.ram.join("/"), q.storage.join("/"), q.color.join("/"), q.stock ? `${q.stock} pcs` : ""].filter(Boolean);
+    const bits = [q.brand_name, q.model && q.model !== q.name ? q.model : "", q.ram.join("/"), q.storage.join("/"), q.color.join("/"), q.stock ? `${q.stock} pcs` : ""].filter(Boolean);
     return bits.join(" · ");
   }
 
@@ -1062,7 +1065,23 @@ export function Inventory() {
     document.getElementById("add-product-scroll")?.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  async function insertProduct(f: typeof emptyForm, actorName: string) {
+  // Brand typed in the form: reuse the existing brand of that name, otherwise create it.
+  async function ensureBrand(typed: string, brandId: string, cache: Map<string, string>): Promise<string | null> {
+    if (brandId) return brandId;
+    const name = typed.trim();
+    if (!name) return null;
+    const key = name.toLowerCase();
+    const known = cache.get(key) ?? brands.find((b) => b.name.trim().toLowerCase() === key)?.id;
+    if (known) return known;
+    const { data, error } = await supabase.from("brands").insert({ name, is_active: true }).select("id").single();
+    if (error) throw error;
+    cache.set(key, data.id);
+    await loadBrands();
+    return data.id;
+  }
+
+  async function insertProduct(f: typeof emptyForm, actorName: string, brandCache: Map<string, string>) {
+    const brandId = await ensureBrand(f.brand_name, f.brand_id, brandCache);
     const serials = f.is_serialized ? parseSerials(f.serials) : [];
 
     const { data: inserted, error: insertErr } = await supabase
@@ -1071,7 +1090,7 @@ export function Inventory() {
         name: f.name.trim(),
         model: f.model.trim(),
         category: f.category,
-        brand_id: f.brand_id || null,
+        brand_id: brandId,
         product_type: f.product_type,
         price: minVariantPrice(f.variant_prices) ?? (Number(f.price) || 0),
         original_price: Number(f.original_price) || null,
@@ -1139,9 +1158,10 @@ export function Inventory() {
       const actorName = session.user.email?.split("@")[0] ?? "Admin";
       const toSave = [...queue, ...(currentFilled ? [form] : [])];
       let saved = 0;
+      const brandCache = new Map<string, string>();
       try {
         for (const f of toSave) {
-          await insertProduct(f, actorName);
+          await insertProduct(f, actorName, brandCache);
           saved++;
         }
       } catch (err: any) {
@@ -1180,13 +1200,14 @@ export function Inventory() {
     setError(null);
 
     try {
+      const editBrandId = await ensureBrand(editBrandName ?? "", editingItem.brand_id ?? "", new Map());
       const { error: updateErr } = await supabase
         .from("inventory")
         .update({
           name: editingItem.name.trim(),
           model: editingItem.model.trim(),
           category: editingItem.category,
-          brand_id: editingItem.brand_id || null,
+          brand_id: editBrandId,
           product_type: editingItem.product_type,
           price:
             minVariantPrice(specsVariantPrices(editingItem.specs)) ?? (Number(editingItem.price) || 0),
@@ -1756,22 +1777,32 @@ export function Inventory() {
                   </select>
                 </Field>
                 <Field label="Brand">
-                  <select
+                  <input
                     className="input w-full"
-                    value={editingItem ? editingItem.brand_id ?? "" : form.brand_id}
-                    onChange={(e) =>
+                    list="brand-options"
+                    placeholder="Type or pick a brand"
+                    autoComplete="off"
+                    value={
                       editingItem
-                        ? setEditingItem({ ...editingItem, brand_id: e.target.value })
-                        : setForm({ ...form, brand_id: e.target.value })
+                        ? editBrandName ?? brands.find((b) => b.id === editingItem.brand_id)?.name ?? ""
+                        : form.brand_name || brands.find((b) => b.id === form.brand_id)?.name || ""
                     }
-                  >
-                    <option value="">-</option>
+                    onChange={(e) => {
+                      const text = e.target.value;
+                      const match = brands.find((b) => b.name.trim().toLowerCase() === text.trim().toLowerCase());
+                      if (editingItem) {
+                        setEditBrandName(text);
+                        setEditingItem({ ...editingItem, brand_id: match?.id ?? "" });
+                      } else {
+                        setForm({ ...form, brand_name: text, brand_id: match?.id ?? "" });
+                      }
+                    }}
+                  />
+                  <datalist id="brand-options">
                     {brands.filter((b) => b.is_active).map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
+                      <option key={b.id} value={b.name} />
                     ))}
-                  </select>
+                  </datalist>
                 </Field>
               </div>
 
