@@ -903,7 +903,6 @@ export function Sales() {
           Received: received,
           Balance: r2(sale.final_amount - received),
           Notes: t(sale.notes),
-          Terms: t(sale.terms),
         };
         if (lines.length === 0) {
           rows.push({ ...head, "Item #": "-", Item: "-", "HSN/SAC": "-", "Serial / IMEI": "-", Qty: "-", "Price/Unit (ex-GST)": "-", "GST %": "-", "Taxable Value": "-", "GST Amount": "-", CGST: "-", SGST: "-", "Line Amount": "-", ...tail });
