@@ -57,7 +57,7 @@ export interface RetailTaxInvoiceInput {
 
 const DEFAULT_GST_RATE_PERCENT = 18;
 
-function numberToWords(num: number): string {
+export function numberToWords(num: number): string {
   const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven",
     "Eight", "Nine", "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen",
     "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];

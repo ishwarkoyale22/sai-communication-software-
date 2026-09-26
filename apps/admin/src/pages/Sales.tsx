@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import {
+import { numberToWords,
   formatCurrency,
   formatDateTime,
   generateSimpleInvoicePdf,
@@ -167,6 +167,7 @@ export function Sales() {
   const [customerStateCode, setCustomerStateCode] = useState("");
   const [receivedText, setReceivedText] = useState<string | null>(null); // null = follows the payment method
   const [terms, setTerms] = useState("Thanks for doing business with us!");
+  const [saleNotes, setSaleNotes] = useState("");
   const [gstRateCustom, setGstRateCustom] = useState<number>(18);
   const [cart, setCart] = useState<CartLine[]>([]);
   const [gifts, setGifts] = useState<GiftItem[]>([]);
@@ -570,6 +571,7 @@ export function Sales() {
           invoice_date: invoiceDate || null,
           amount_received: received,
           terms: terms.trim() || null,
+          notes: saleNotes.trim() || null,
         })
         .select()
         .single();
@@ -1119,6 +1121,7 @@ export function Sales() {
                 </select>
                 <textarea className="input col-span-2" rows={2} placeholder="Customer address (optional)" value={customerAddress} onChange={(e) => setCustomerAddress(e.target.value)} />
                 <textarea className="input col-span-2" rows={2} placeholder="Terms & conditions (printed on the invoice)" value={terms} onChange={(e) => setTerms(e.target.value)} />
+                <textarea className="input col-span-2" rows={2} placeholder="Internal notes (not printed)" value={saleNotes} onChange={(e) => setSaleNotes(e.target.value)} />
               </div>
             )}
 
@@ -1352,6 +1355,19 @@ export function Sales() {
                 <span>Invoice Total</span>
                 <span>{money2(cartTotal)}</span>
               </div>
+              {cartTotal > 0 && (
+                <div className="space-y-0.5 pt-1 text-[11px] text-gray-400">
+                  <div className="flex justify-between">
+                    <span>Lines · total quantity</span>
+                    <span>{cart.length + giftCart.length + hamperCart.length} · {cart.reduce((n, l) => n + l.quantity, 0) + giftCart.reduce((n, l) => n + l.quantity, 0) + hamperCart.reduce((n, l) => n + l.quantity, 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Place of supply</span>
+                    <span>{effectiveCustomerState ? stateLabel(effectiveCustomerState) : SHOP.state} · {interState ? "IGST" : "CGST + SGST"}</span>
+                  </div>
+                  <div>In words: {numberToWords(Math.round(cartTotal))}</div>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between border-t border-border pt-2">
