@@ -37,6 +37,9 @@ interface InventoryItem {
   is_active: boolean;
   cost_price: number | null;
   is_serialized: boolean;
+  /** HSN/SAC + GST rate for tax invoices (columns added by migration 0058; undefined until that is applied). */
+  hsn_sac?: string | null;
+  gst_rate?: number | null;
 }
 
 // Must exactly match the live `inventory_category_check` constraint —
@@ -44,7 +47,20 @@ interface InventoryItem {
 // CHECK (category = ANY (ARRAY['Smartphones','Feature Phones','Tablets','Accessories','Refurbished','Home Appliances']))
 const CATEGORY_OPTIONS = ["Smartphones", "Feature Phones", "Tablets", "Accessories", "Refurbished", "Home Appliances"];
 
+// Suggested HSN/SAC per category (the rate is the current slab for that heading). Accessories/appliances vary by product.
+const HSN_HINTS: Record<string, { code?: string; rate?: number; note: string }> = {
+  Smartphones: { code: "8517", rate: 18, note: "Mobile phones: HSN 8517, GST 18%" },
+  "Feature Phones": { code: "8517", rate: 18, note: "Mobile phones: HSN 8517, GST 18%" },
+  Tablets: { code: "8471", rate: 18, note: "Tablets / computers: HSN 8471, GST 18%" },
+  Refurbished: { code: "8517", rate: 18, note: "Phones: HSN 8517, GST 18% (second-hand goods may use the margin scheme — ask your CA)" },
+  Accessories: { note: "Varies: chargers 8504, cables 8544, earphones 8518, cases 3926/4202, power banks 8507" },
+  "Home Appliances": { note: "Varies by product — check the HSN on the supplier's invoice" },
+};
+const GST_RATE_CHOICES = [0, 5, 12, 18, 28];
+
 const emptyForm = {
+  hsn_sac: "",
+  gst_rate: "" as string, // "" = not set (the sale form's default rate is used)
   name: "",
   category: "Smartphones",
   brand_id: "",
@@ -1108,6 +1124,9 @@ export function Inventory() {
         cost_price: Number(f.cost_price) || null,
         is_serialized: f.is_serialized,
         specs: buildSpecs(f.ram, f.storage, f.color, f.variant_prices),
+        // Only sent when filled in, so adding products keeps working until migration 0058 is applied.
+        ...(f.hsn_sac.trim() ? { hsn_sac: f.hsn_sac.trim() } : {}),
+        ...(f.gst_rate !== "" ? { gst_rate: Number(f.gst_rate) } : {}),
       })
       .select("id")
       .single();
@@ -1221,6 +1240,9 @@ export function Inventory() {
           images: editingItem.images ?? [],
           is_active: editingItem.is_active,
           cost_price: editingItem.cost_price == null ? null : Number(editingItem.cost_price),
+          // Included only once the product has them (or the user typed them) — safe before migration 0058.
+          ...(editingItem.hsn_sac !== undefined ? { hsn_sac: (editingItem.hsn_sac ?? "").trim() || null } : {}),
+          ...(editingItem.gst_rate !== undefined ? { gst_rate: editingItem.gst_rate ?? null } : {}),
           // Serialized items derive stock from inventory_units (via trigger) — leave it untouched here.
           ...(editingItem.is_serialized ? {} : { stock: Number(editingItem.stock) || 0 }),
           specs: buildSpecs(
@@ -1912,6 +1934,59 @@ export function Inventory() {
                   }
                 />
               </Field>
+
+              <div className="rounded-md border border-border p-2.5">
+                <div className="mb-2 text-xs font-semibold text-gray-600">Tax invoice details (optional)</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="HSN / SAC code">
+                    <input
+                      className="input w-full"
+                      inputMode="numeric"
+                      placeholder="e.g. 8517"
+                      value={editingItem ? editingItem.hsn_sac ?? "" : form.hsn_sac}
+                      onChange={(e) => {
+                        const v = e.target.value.replace(/[^\d]/g, "").slice(0, 8);
+                        editingItem ? setEditingItem({ ...editingItem, hsn_sac: v }) : setForm({ ...form, hsn_sac: v });
+                      }}
+                    />
+                  </Field>
+                  <Field label="GST rate">
+                    <select
+                      className="input w-full"
+                      value={editingItem ? (editingItem.gst_rate == null ? "" : String(editingItem.gst_rate)) : form.gst_rate}
+                      onChange={(e) =>
+                        editingItem
+                          ? setEditingItem({ ...editingItem, gst_rate: e.target.value === "" ? null : Number(e.target.value) })
+                          : setForm({ ...form, gst_rate: e.target.value })
+                      }
+                    >
+                      <option value="">Not set (use sale default)</option>
+                      {GST_RATE_CHOICES.map((r) => (
+                        <option key={r} value={String(r)}>{r}%</option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                {(() => {
+                  const cat = editingItem ? editingItem.category ?? "" : form.category;
+                  const hint = HSN_HINTS[cat];
+                  if (!hint) return null;
+                  const apply = () =>
+                    editingItem
+                      ? setEditingItem({ ...editingItem, hsn_sac: hint.code ?? editingItem.hsn_sac ?? "", gst_rate: hint.rate ?? editingItem.gst_rate ?? null })
+                      : setForm({ ...form, hsn_sac: hint.code ?? form.hsn_sac, gst_rate: hint.rate != null ? String(hint.rate) : form.gst_rate });
+                  return (
+                    <div className="mt-1.5 flex items-start justify-between gap-2 text-[11px] text-gray-500">
+                      <span>{hint.note}</span>
+                      {hint.code && (
+                        <button type="button" className="shrink-0 font-medium text-brand-primary hover:underline" onClick={apply}>
+                          Use suggested
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
 
               {!editingItem && (
                 <>
