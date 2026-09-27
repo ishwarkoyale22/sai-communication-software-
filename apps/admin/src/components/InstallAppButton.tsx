@@ -14,14 +14,46 @@ function isStandalone() {
 function isIos() {
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
+function isAndroid() {
+  return /android/i.test(navigator.userAgent);
+}
+
+type HelpKind = "ios" | "android" | "desktop";
+
+const HELP_STEPS: Record<HelpKind, { title: string; steps: string[]; note: string }> = {
+  ios: {
+    title: "Install on iPhone / iPad",
+    steps: ["Tap the Share button in Safari's toolbar.", "Scroll down and tap Add to Home Screen.", "Tap Add — the app icon appears on your Home Screen."],
+    note: "This only works in Safari, not other iPhone browsers.",
+  },
+  android: {
+    title: "Install on Android",
+    steps: [
+      "Tap the ⋮ menu in the top-right of your browser.",
+      "Tap Install app (or Add to Home screen).",
+      "Confirm — the app icon appears on your Home Screen.",
+    ],
+    note: "In Chrome this menu option only appears after the page has fully loaded once.",
+  },
+  desktop: {
+    title: "Install on this computer",
+    steps: [
+      "Look for an install icon (a monitor with a down-arrow) at the right edge of the address bar.",
+      "If you don't see it, open the browser menu (⋮) and look for Install Sai Communication… or Apps → Install this site as an app.",
+    ],
+    note: "Works in Chrome and Edge; other browsers don't support installing sites as apps.",
+  },
+};
 
 /**
- * Small "Install App" affordance shown in the admin and staff headers.
+ * "Install App" affordance shown in the admin and staff headers.
  *
  * Chrome/Edge/Android fire `beforeinstallprompt` when the page qualifies (manifest + service worker
- * present) — we hold onto that event and trigger it from our own button, since the browser's native
- * install icon is easy to miss and varies by browser. iOS Safari never fires that event (no native
- * install API), so there we show the manual "Share → Add to Home Screen" steps instead.
+ * present, and the browser's own engagement heuristics are met) — when that has fired, our button
+ * triggers that real native prompt directly. Until then — or on a browser that never fires it, like
+ * iOS Safari or desktop Firefox — the button instead shows manual steps for that platform, so the
+ * option is always visible and always does something, rather than silently disappearing while
+ * waiting on a browser signal the person has no way to see.
  *
  * Hidden entirely once the app is already running installed (standalone display mode), or after the
  * person dismisses it once (remembered on this device only — it can show again after 30 days, in case
@@ -29,7 +61,7 @@ function isIos() {
  */
 export function InstallAppButton() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [showIosHelp, setShowIosHelp] = useState(false);
+  const [helpKind, setHelpKind] = useState<HelpKind | null>(null);
   const [installed, setInstalled] = useState(isStandalone);
 
   useEffect(() => {
@@ -54,8 +86,6 @@ export function InstallAppButton() {
   const recentlyDismissed = dismissedAt && Date.now() - dismissedAt < 30 * 24 * 60 * 60 * 1000;
 
   if (installed || recentlyDismissed) return null;
-  // Only show once we actually have something to do: a real install prompt, or iOS's manual steps.
-  if (!deferred && !isIos()) return null;
 
   async function install() {
     if (deferred) {
@@ -63,8 +93,8 @@ export function InstallAppButton() {
       const { outcome } = await deferred.userChoice;
       if (outcome === "accepted") setInstalled(true);
       setDeferred(null);
-    } else if (isIos()) {
-      setShowIosHelp(true);
+    } else {
+      setHelpKind(isIos() ? "ios" : isAndroid() ? "android" : "desktop");
     }
   }
 
@@ -72,8 +102,10 @@ export function InstallAppButton() {
     e.stopPropagation();
     localStorage.setItem(DISMISS_KEY, String(Date.now()));
     setDeferred(null);
-    setShowIosHelp(false);
+    setHelpKind(null);
   }
+
+  const help = helpKind ? HELP_STEPS[helpKind] : null;
 
   return (
     <>
@@ -86,23 +118,19 @@ export function InstallAppButton() {
         <span className="hidden sm:inline">Install App</span>
       </button>
 
-      {showIosHelp && (
-        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setShowIosHelp(false)}>
+      {help && (
+        <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 p-4 sm:items-center" onClick={() => setHelpKind(null)}>
           <div className="w-full max-w-xs rounded-2xl bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between">
-              <h3 className="font-serif text-sm font-semibold text-gray-800">Install on iPhone / iPad</h3>
+              <h3 className="font-serif text-sm font-semibold text-gray-800">{help.title}</h3>
               <button onClick={dismiss} aria-label="Close"><X size={16} className="text-gray-400" /></button>
             </div>
             <ol className="list-inside list-decimal space-y-1.5 text-sm text-gray-600">
-              <li>
-                Tap the <b>Share</b> button in Safari's toolbar.
-              </li>
-              <li>
-                Scroll down and tap <b>Add to Home Screen</b>.
-              </li>
-              <li>Tap <b>Add</b> — the app icon appears on your Home Screen.</li>
+              {help.steps.map((s, i) => (
+                <li key={i}>{s}</li>
+              ))}
             </ol>
-            <p className="mt-2 text-[11px] text-gray-400">This only works in Safari, not other iPhone browsers.</p>
+            <p className="mt-2 text-[11px] text-gray-400">{help.note}</p>
           </div>
         </div>
       )}
