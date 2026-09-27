@@ -2,6 +2,26 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Chrome can fire beforeinstallprompt the moment it finishes evaluating the page — which can be
+      // BEFORE the React app has parsed, mounted through its auth check, and rendered the header far
+      // enough down to attach its own listener. A React-only listener that starts that late can miss a
+      // beforeinstallprompt that already fired and gone, permanently, for that whole page load (the
+      // event is not replayed) — Chrome does NOT show anything on its own in that case either (the
+      // automatic mini-infobar was removed years ago), so the person is left with only the ⋮ menu's own
+      // separate, Chrome-held copy of the install flow. This inline script runs synchronously, before
+      // any other script on the page, so it is guaranteed not to miss it.
+      window.__saiInstallPrompt = null;
+      window.addEventListener("beforeinstallprompt", function (e) {
+        e.preventDefault();
+        window.__saiInstallPrompt = e;
+        window.dispatchEvent(new CustomEvent("sai:bip-ready"));
+      });
+      window.addEventListener("appinstalled", function () {
+        window.__saiInstallPrompt = null;
+        window.dispatchEvent(new CustomEvent("sai:bip-installed"));
+      });
+    </script>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png" />

@@ -5,6 +5,15 @@ export interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
+declare global {
+  interface Window {
+    // Captured as early as physically possible by an inline <script> in index.html, before React (or
+    // its auth check, or the lazy-loaded header component) has even started — see the comment there
+    // for why a React-only listener can permanently miss this event.
+    __saiInstallPrompt?: BeforeInstallPromptEvent | null;
+  }
+}
+
 export function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches || (navigator as any).standalone === true;
 }
@@ -26,25 +35,38 @@ export function isAndroid() {
  * smallest possible hint for that device — never a multi-step walkthrough.
  */
 export function useInstallPrompt() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
+  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(() => window.__saiInstallPrompt ?? null);
   const [installed, setInstalled] = useState(isStandalone);
 
   useEffect(() => {
     if (installed) return;
-    const onPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
+    // The event may already have arrived and been stashed by index.html's inline script before this
+    // component ever mounted — pick it up immediately rather than waiting for it to fire again (it won't).
+    if (window.__saiInstallPrompt && !deferred) setDeferred(window.__saiInstallPrompt);
+
+    const onReady = () => setDeferred(window.__saiInstallPrompt ?? null);
+    const onInstalledGlobal = () => {
       setInstalled(true);
       setDeferred(null);
     };
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalled);
-    return () => {
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalled);
+    // Also listen directly, in case this ever runs in a context without the inline script (harmless
+    // redundancy — whichever listener sees it first wins, both do the same thing).
+    const onPrompt = (e: Event) => {
+      e.preventDefault();
+      window.__saiInstallPrompt = e as BeforeInstallPromptEvent;
+      setDeferred(e as BeforeInstallPromptEvent);
     };
+    window.addEventListener("sai:bip-ready", onReady);
+    window.addEventListener("sai:bip-installed", onInstalledGlobal);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalledGlobal);
+    return () => {
+      window.removeEventListener("sai:bip-ready", onReady);
+      window.removeEventListener("sai:bip-installed", onInstalledGlobal);
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalledGlobal);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [installed]);
 
   async function install(): Promise<"accepted" | "dismissed" | "unavailable"> {
@@ -53,6 +75,7 @@ export function useInstallPrompt() {
     const { outcome } = await deferred.userChoice;
     if (outcome === "accepted") setInstalled(true);
     setDeferred(null);
+    window.__saiInstallPrompt = null;
     return outcome;
   }
 
