@@ -179,7 +179,10 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
       endExpiredSession();
       return;
     }
-    const unread = ((data as { is_read: boolean; type: string; link: string | null }[]) ?? []).filter((n) => !n.is_read);
+    // is_open (not is_read) drives the badge — a task/repair/follow-up notification stays "open" until
+    // the thing itself is actually done, independent of whether it's been tapped. See
+    // notification_is_open() (migration 0063); types with no such concept fall back to is_read there.
+    const unread = ((data as { is_open: boolean; type: string; link: string | null }[]) ?? []).filter((n) => n.is_open);
     setUnreadNotifications(unread.length);
     const by: Record<string, number> = {};
     for (const n of unread) {

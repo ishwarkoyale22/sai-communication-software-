@@ -23,6 +23,10 @@ interface Notification {
   body: string | null;
   link: string | null;
   is_read: boolean;
+  // Whether the thing this notification is about is still unresolved — independent of is_read. See
+  // notification_is_open() (migration 0061/0063). Drives the highlighting below, not is_read, so a
+  // task/repair/follow-up notification stays visibly "open" until actually done, not just until tapped.
+  is_open: boolean;
   created_at: string;
 }
 
@@ -80,7 +84,7 @@ export function Notifications() {
           <button
             key={n.id}
             onClick={() => openNotification(n)}
-            className={`card flex w-full items-start gap-3 p-3 text-left ${!n.is_read ? "border-l-2 border-brand-primary" : ""}`}
+            className={`card flex w-full items-start gap-3 p-3 text-left ${n.is_open ? "border-l-2 border-brand-primary" : ""}`}
           >
             <div className="mt-0.5 shrink-0 text-brand-primary">
               <Icon size={18} />
@@ -88,7 +92,7 @@ export function Notifications() {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="truncate text-sm font-medium text-gray-800">{n.title}</span>
-                {!n.is_read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
+                {n.is_open && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
               </div>
               {n.body && <div className="mt-0.5 truncate text-xs text-gray-500">{n.body}</div>}
               <div className="mt-1 text-[11px] text-gray-400">{new Date(n.created_at).toLocaleString("en-IN")}</div>
