@@ -68,3 +68,39 @@ self.addEventListener("fetch", (event) => {
   }
   // everything else: default network behaviour (no respondWith)
 });
+
+// Real OS-level push notifications (lock screen / notification shade), sent by api/send-push.js.
+self.addEventListener("push", (event) => {
+  let data = { title: "Sai Communication", body: "", link: "/" };
+  try {
+    if (event.data) data = { ...data, ...event.data.json() };
+  } catch {
+    /* not JSON — keep the defaults */
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: "/logo.png",
+      badge: "/favicon-192.png",
+      data: { link: data.link },
+      tag: data.link, // a second notification for the same page replaces the first instead of stacking
+    })
+  );
+});
+
+// Tapping the notification focuses an already-open tab on that page, or opens a new one.
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const link = event.notification.data?.link || "/";
+  event.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        if (new URL(client.url).origin === self.location.origin) {
+          client.navigate(link);
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(link);
+    })
+  );
+});

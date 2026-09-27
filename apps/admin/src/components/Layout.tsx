@@ -42,6 +42,7 @@ import { useAuth } from "../context/AuthContext";
 import { NotificationBell } from "./NotificationBell";
 import { BrandLogo } from "./BrandLogo";
 import { InstallAppButton } from "./InstallAppButton";
+import { EnableNotificationsButton } from "./EnableNotificationsButton";
 
 const NAV_GROUPS: {
   label: string;
@@ -327,6 +328,7 @@ export function Layout() {
           </div>
           <div className="flex items-center gap-2">
             <InstallAppButton />
+            <EnableNotificationsButton target={{ forAdmin: true }} />
             <NotificationBell />
             <div
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow-sm"

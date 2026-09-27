@@ -6,6 +6,7 @@ import { useStaffAuth } from "../context/StaffAuthContext";
 import { SmoothScroll } from "../../components/SmoothScroll";
 import { BrandLogo } from "../../components/BrandLogo";
 import { InstallAppButton } from "../../components/InstallAppButton";
+import { EnableNotificationsButton } from "../../components/EnableNotificationsButton";
 
 export function MobileLayout() {
   const { staff, signOut, unreadNotifications } = useStaffAuth();
@@ -62,6 +63,7 @@ export function MobileLayout() {
           </div>
           <div className="relative flex items-center gap-1.5">
             <InstallAppButton />
+            {staff?.id && <EnableNotificationsButton target={{ staffId: staff.id }} />}
             <button
               onClick={() => signOut()}
               className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-accent hover:text-brand-danger"
