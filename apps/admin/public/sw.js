@@ -89,6 +89,8 @@ self.addEventListener("push", (event) => {
       // why only the very first push for a given link ever lit up the lock screen and every push after it
       // (the vast majority in practice — the same staff member getting a second task, a third, etc., all
       // sharing the "/portal/tasks" tag) just swapped the tray entry with nothing shown on a locked phone.
+      vibrate: [300, 100, 300, 100, 300], // Active vibration pattern — signals Android to treat this as an Alerting / High-Priority notification
+      requireInteraction: true,           // Keeps the notification visible until user interacts with it
     })
   );
 });
