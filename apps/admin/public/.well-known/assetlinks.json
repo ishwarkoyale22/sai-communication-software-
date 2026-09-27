@@ -1,0 +1,8 @@
+[{
+      "relation": ["delegate_permission/common.handle_all_urls"],
+      "target": {
+        "namespace": "android_app",
+        "package_name": "com.saicommunication.admin",
+        "sha256_cert_fingerprints": ["F7:E8:BA:36:2F:83:59:F7:4A:59:81:1C:A6:B8:57:79:27:AE:01:9C:A4:C4:BD:C7:99:8B:F9:03:CB:A7:50:C2"]
+      }
+    }]

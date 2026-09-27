@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../context/AuthContext";
 import { Check, X, Plus, PartyPopper } from "lucide-react";
 
 interface Staff {
@@ -43,6 +44,7 @@ const TABS = ["Attendance", "Leave", "Tasks"] as const;
 type Tab = (typeof TABS)[number];
 
 export function StaffPortal() {
+  const { session } = useAuth();
   const [searchParams] = useSearchParams();
   const tabParam = searchParams.get("tab");
   const initialTab: Tab = TABS.includes(tabParam as Tab) ? (tabParam as Tab) : "Attendance";
@@ -121,21 +123,35 @@ export function StaffPortal() {
   }
 
   async function reviewLeave(id: string, status: "approved" | "rejected") {
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("leave_requests").update({ status, reviewed_by: user?.id, reviewed_at: new Date().toISOString() }).eq("id", id);
+    // supabase.auth.getUser() re-validates the token against the server on every call — if it happens
+    // to land right as the access token expires, the client treats that as an invalid session and signs
+    // the whole app out (that was the actual cause of "assigning a task logs me out"). We already trust
+    // this browser's own session (RequireAdmin wouldn't have rendered this page otherwise), so just read
+    // the id already sitting in it instead of a fresh, fragile round trip for every single action.
+    const { error } = await supabase
+      .from("leave_requests")
+      .update({ status, reviewed_by: session?.user.id, reviewed_at: new Date().toISOString() })
+      .eq("id", id);
+    if (error) {
+      alert(`Could not update the leave request: ${error.message}`);
+      return;
+    }
     load();
   }
 
   async function assignTask() {
     if (!taskForm.staff_id || !taskForm.title.trim()) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    await supabase.from("staff_tasks").insert({
+    const { error } = await supabase.from("staff_tasks").insert({
       staff_id: taskForm.staff_id,
       title: taskForm.title.trim(),
       description: taskForm.description.trim() || null,
       due_date: taskForm.due_date || null,
-      assigned_by: user?.id,
+      assigned_by: session?.user.id,
     });
+    if (error) {
+      alert(`Could not assign the task: ${error.message}`);
+      return;
+    }
     setTaskForm({ staff_id: "", title: "", description: "", due_date: "" });
     setShowTaskForm(false);
     load();

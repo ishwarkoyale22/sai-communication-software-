@@ -200,9 +200,13 @@ export function Repairs() {
       </div>
 
       {view === "kanban" ? (
-        <div className="grid grid-cols-6 gap-3">
+        // A rigid 6-column grid squeezed every column down to a sliver on phone-width screens (headers
+        // wrapping one word per line, cards unreadable). Below lg, this scrolls horizontally instead,
+        // each column wide enough to actually read; at lg+ it still lays out as one full-width row.
+        <div className="-mx-4 overflow-x-auto px-4 pb-2 lg:mx-0 lg:overflow-visible lg:px-0 lg:pb-0">
+          <div className="flex gap-3 lg:grid lg:grid-cols-6">
           {REPAIR_STATUSES.map((status) => (
-            <div key={status} className={`${STATUS_TILE[status]} p-2`}>
+            <div key={status} className={`${STATUS_TILE[status]} w-[75vw] shrink-0 p-2 sm:w-64 lg:w-auto`}>
               <div className="mb-2 px-1 text-xs font-semibold uppercase text-gray-500">
                 {STATUS_LABEL[status]} ({repairs.filter((r) => r.status === status).length})
               </div>
@@ -259,6 +263,7 @@ export function Repairs() {
               </div>
             </div>
           ))}
+          </div>
         </div>
       ) : (
         <div className="card overflow-x-auto">

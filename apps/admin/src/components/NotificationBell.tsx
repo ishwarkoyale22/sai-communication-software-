@@ -10,6 +10,10 @@ interface AdminNotification {
   body: string | null;
   link: string | null;
   is_read: boolean;
+  // Whether the thing this notification is about (an order, leave request, repair, …) is still
+  // unresolved — independent of is_read. See notification_is_open() (migration 0061). The bell's count
+  // and highlighting track this, not is_read, so opening the dropdown no longer makes open work vanish.
+  is_open: boolean;
   created_at: string;
 }
 
@@ -39,16 +43,11 @@ export function NotificationBell() {
   }, []);
 
   async function load() {
-    const { data } = await supabase
-      .from("notifications")
-      .select("id, type, title, body, link, is_read, created_at")
-      .eq("for_admin", true)
-      .order("created_at", { ascending: false })
-      .limit(30);
+    const { data } = await supabase.rpc("admin_notifications_with_open_status");
     setItems((data as AdminNotification[]) ?? []);
   }
 
-  const unreadCount = items.filter((n) => !n.is_read).length;
+  const unreadCount = items.filter((n) => n.is_open).length;
 
   async function openNotification(n: AdminNotification) {
     if (!n.is_read) {
@@ -75,7 +74,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 z-50 max-h-96 w-80 overflow-y-auto rounded-lg border border-border bg-card shadow-cardHover">
+        <div className="absolute right-0 top-10 z-50 max-h-96 w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border border-border bg-card shadow-cardHover">
           <div className="border-b border-border p-3 text-xs font-semibold uppercase text-gray-400">Notifications</div>
           {items.length === 0 ? (
             <div className="p-6 text-center text-sm text-gray-400">No notifications yet.</div>
@@ -85,11 +84,11 @@ export function NotificationBell() {
                 key={n.id}
                 onClick={() => openNotification(n)}
                 className={`flex w-full flex-col gap-0.5 border-b border-border p-3 text-left text-sm last:border-b-0 hover:bg-accent ${
-                  !n.is_read ? "bg-brand-primary/5" : ""
+                  n.is_open ? "bg-brand-primary/5" : ""
                 }`}
               >
                 <div className="flex items-center gap-1.5">
-                  {!n.is_read && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
+                  {n.is_open && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
                   <span className="truncate font-medium text-gray-800">{n.title}</span>
                 </div>
                 {n.body && <span className="truncate text-xs text-gray-500">{n.body}</span>}

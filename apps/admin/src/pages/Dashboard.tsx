@@ -443,12 +443,16 @@ export function Dashboard() {
               const Card = (
                 <div className="card relative overflow-hidden p-4 pl-5 transition-shadow hover:shadow-cardHover">
                   <div className={`absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${c.bar}`} />
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="text-xs font-medium text-gray-500">{c.label}</div>
-                      <div className="mt-1 font-serif text-2xl font-semibold text-gray-800">{c.value}</div>
+                  <div className="flex items-start justify-between gap-2">
+                    {/* min-w-0 lets this shrink inside the flex row instead of shoving the icon chip
+                        past the card edge — a large rupee value (Live Stock Value etc.) otherwise
+                        refused to wrap or shrink and visually collided with/overflowed past the icon
+                        on narrow (2-column) mobile layouts. */}
+                    <div className="min-w-0">
+                      <div className="truncate text-xs font-medium text-gray-500">{c.label}</div>
+                      <div className="mt-1 truncate font-serif text-xl font-semibold text-gray-800 sm:text-2xl">{c.value}</div>
                     </div>
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${a.chip} ${a.icon}`}>
+                    <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${a.chip} ${a.icon}`}>
                       <c.icon size={17} strokeWidth={1.75} />
                     </div>
                   </div>

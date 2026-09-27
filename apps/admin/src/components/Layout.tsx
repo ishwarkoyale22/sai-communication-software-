@@ -121,30 +121,37 @@ export function Layout() {
   const mainRef = useRef<HTMLElement | null>(null);
   const mainContentRef = useRef<HTMLDivElement | null>(null);
 
-  // Unread admin notifications counted per sidebar section (by the path in
-  // each notification's link). Opening a section marks its alerts as read.
+  // Sidebar badges count OPEN work per section (by the path in each notification's link), not merely
+  // "unread" — a website order, leave request, repair, finance application or task keeps its badge
+  // until the thing itself is resolved (delivered/approved/completed/…), not until someone glances at
+  // the page. See notification_is_open() (migration 0061): for types with no such underlying status
+  // (an announcement, an already-resolved notice like "leave approved"), it falls back to is_read.
   const [unreadByPath, setUnreadByPath] = useState<Record<string, number>>({});
   useEffect(() => {
     let alive = true;
     async function loadUnread() {
-      const { data } = await supabase
-        .from("notifications")
-        .select("id, link")
-        .eq("for_admin", true)
-        .eq("is_read", false)
-        .not("link", "is", null);
+      const { data } = await supabase.rpc("admin_notifications_with_open_status");
       if (!alive) return;
       const by: Record<string, number> = {};
-      for (const n of (data as { link: string }[]) ?? []) {
+      for (const n of (data as { link: string | null; is_open: boolean }[]) ?? []) {
+        if (!n.is_open || !n.link) continue;
         const path = n.link.split("?")[0];
         by[path] = (by[path] ?? 0) + 1;
       }
       setUnreadByPath(by);
     }
     loadUnread();
+    // The badge must also react to the SOURCE record changing (an order marked delivered, a leave
+    // request approved elsewhere) — not just to new notification rows — since that's what actually
+    // clears an "open" badge now.
     const channel = supabase
       .channel("admin-sidebar-badges")
       .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: "for_admin=eq.true" }, loadUnread)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "website_orders" }, loadUnread)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "leave_requests" }, loadUnread)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "repair_enquiries" }, loadUnread)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "finance_transactions" }, loadUnread)
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "staff_tasks" }, loadUnread)
       .subscribe();
     return () => {
       alive = false;
@@ -153,17 +160,19 @@ export function Layout() {
   }, []);
   useEffect(() => {
     const path = location.pathname;
-    if (!unreadByPath[path]) return;
-    setUnreadByPath((prev) => ({ ...prev, [path]: 0 }));
+    // Visiting a section still marks its notifications is_read (so the bell's dropdown reflects "seen"),
+    // but no longer zeroes the sidebar badge here — that would re-hide still-open work the instant its
+    // page is opened, which is exactly the behavior this was changed to stop doing. The badge now only
+    // clears via the realtime listeners above, once the underlying record is actually resolved.
     supabase
       .from("notifications")
       .update({ is_read: true })
       .eq("for_admin", true)
       .eq("is_read", false)
-      .like("link", `${path}%`)
+      .or(`link.eq.${path},link.like.${path}?%`)
       .then(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname, unreadByPath]);
+  }, [location.pathname]);
 
   // Close the drawer automatically on navigation, so tapping a link doesn't
   // leave the overlay sitting open behind the new page.

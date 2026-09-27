@@ -1,12 +1,20 @@
 import { useState } from "react";
 import { Download, Loader2 } from "lucide-react";
-import { useInstallPrompt } from "../lib/useInstallPrompt";
+import { useInstallPrompt, isAndroid } from "../lib/useInstallPrompt";
 import { InstallHintToast } from "./InstallHintToast";
 
 /**
- * The one "Download App" button — shown in the header on every page. One tap: if the browser has a
- * real install prompt ready, it opens immediately, no dialog of ours in the way. Otherwise a single-
- * line hint appears for a few seconds (see InstallHintToast); there is no other UI in between.
+ * The one "Download App" button — shown in the header on every page.
+ *
+ * Android gets the real .apk (built as a Trusted Web Activity around this same site) as a direct
+ * download link — one tap starts the download, exactly like the desktop flow's one tap opens the
+ * install dialog. A second tap on the downloaded file is Android's own "install unknown app"
+ * confirmation, which no website can skip (same as any sideloaded .apk) — that mirrors clicking
+ * "Install" in the desktop dialog, not an extra step we added.
+ *
+ * Everywhere else (desktop, iOS) there's no .apk to install, so it falls back to the PWA install
+ * flow: the browser's native prompt when available, or a single-line hint (see InstallHintToast)
+ * when it isn't.
  */
 export function InstallAppButton() {
   const { canPromptNatively, installed, installing, install } = useInstallPrompt();
@@ -15,6 +23,20 @@ export function InstallAppButton() {
   const [busy, setBusy] = useState(false);
 
   if (installed) return null;
+
+  if (isAndroid()) {
+    return (
+      <a
+        href="/sai-admin.apk"
+        download
+        className="flex items-center gap-1.5 rounded-lg border border-brand-primary/30 bg-brand-primary/5 px-2.5 py-1.5 text-xs font-semibold text-brand-primary transition-colors hover:bg-brand-primary/10"
+        title="Download the Android app"
+      >
+        <Download size={13} />
+        <span className="hidden sm:inline">Download App</span>
+      </a>
+    );
+  }
 
   async function handleClick() {
     if (busy) return; // a stray double-tap must not call the native prompt twice
