@@ -136,6 +136,20 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // App icon badge (Badging API) — the WhatsApp-style red count on the home-screen icon, on top
+  // of the in-app tile badges above and the lock-screen push. Only installed PWAs on Chromium
+  // browsers implement this (not in lib.dom.d.ts yet, hence the cast); iOS Safari and a plain
+  // browser tab have no such API, so this is a silent no-op there rather than a crash.
+  useEffect(() => {
+    const nav = navigator as Navigator & {
+      setAppBadge?: (count?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    if (!nav.setAppBadge) return;
+    if (unreadNotifications > 0) nav.setAppBadge(unreadNotifications).catch(() => undefined);
+    else nav.clearAppBadge?.().catch(() => undefined);
+  }, [unreadNotifications]);
+
   async function refreshAttendanceFor(tok: string) {
     const { data } = await supabase.rpc("staff_get_attendance", { p_token: tok });
     const open = (data as Attendance[] | null)?.find((a) => !a.clock_out) ?? null;
