@@ -6,8 +6,6 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
 }
 
-const DISMISS_KEY = "sai_pwa_install_dismissed";
-
 function isStandalone() {
   return window.matchMedia("(display-mode: standalone)").matches || (navigator as any).standalone === true;
 }
@@ -55,9 +53,8 @@ const HELP_STEPS: Record<HelpKind, { title: string; steps: string[]; note: strin
  * option is always visible and always does something, rather than silently disappearing while
  * waiting on a browser signal the person has no way to see.
  *
- * Hidden entirely once the app is already running installed (standalone display mode), or after the
- * person dismisses it once (remembered on this device only — it can show again after 30 days, in case
- * it was dismissed by accident).
+ * Stays visible on every visit until the app is actually installed (standalone display mode) — closing
+ * the help dialog only closes that dialog, it does not hide the button.
  */
 export function InstallAppButton() {
   const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
@@ -82,10 +79,7 @@ export function InstallAppButton() {
     };
   }, [installed]);
 
-  const dismissedAt = Number(localStorage.getItem(DISMISS_KEY) || 0);
-  const recentlyDismissed = dismissedAt && Date.now() - dismissedAt < 30 * 24 * 60 * 60 * 1000;
-
-  if (installed || recentlyDismissed) return null;
+  if (installed) return null;
 
   async function install() {
     if (deferred) {
@@ -96,13 +90,6 @@ export function InstallAppButton() {
     } else {
       setHelpKind(isIos() ? "ios" : isAndroid() ? "android" : "desktop");
     }
-  }
-
-  function dismiss(e: React.MouseEvent) {
-    e.stopPropagation();
-    localStorage.setItem(DISMISS_KEY, String(Date.now()));
-    setDeferred(null);
-    setHelpKind(null);
   }
 
   const help = helpKind ? HELP_STEPS[helpKind] : null;
@@ -123,7 +110,7 @@ export function InstallAppButton() {
           <div className="w-full max-w-xs rounded-2xl bg-white p-4 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="mb-2 flex items-center justify-between">
               <h3 className="font-serif text-sm font-semibold text-gray-800">{help.title}</h3>
-              <button onClick={dismiss} aria-label="Close"><X size={16} className="text-gray-400" /></button>
+              <button onClick={() => setHelpKind(null)} aria-label="Close"><X size={16} className="text-gray-400" /></button>
             </div>
             <ol className="list-inside list-decimal space-y-1.5 text-sm text-gray-600">
               {help.steps.map((s, i) => (
