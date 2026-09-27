@@ -7,6 +7,7 @@ import {
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
 import { dbTime } from "../lib/time";
+import { InstallAppCard } from "../../components/InstallAppCard";
 
 const CONFETTI = ["🎉", "🎈", "🎂", "🎊", "🌸", "✨"];
 
@@ -182,6 +183,8 @@ export function Home() {
 
   return (
     <div className="space-y-4">
+      <InstallAppCard />
+
       {ownBirthday && showCelebration && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
           <div className="relative w-full max-w-xs overflow-hidden rounded-2xl bg-gradient-to-br from-gold via-gold to-goldDim p-6 text-center text-white shadow-xl">

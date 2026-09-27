@@ -5,6 +5,7 @@ import { formatCurrency, formatDateTime, computePaymentSplit } from "@sai/shared
 import { supabase } from "../lib/supabase";
 import { StatusPill } from "../components/StatusPill";
 import { GiftsOverview } from "../components/GiftsOverview";
+import { InstallAppCard } from "../components/InstallAppCard";
 
 type Period = "day" | "week" | "month" | "year";
 
@@ -413,6 +414,8 @@ export function Dashboard() {
 
   return (
     <div className="space-y-5">
+      <InstallAppCard />
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h1 className="text-lg font-semibold text-gray-800">Dashboard</h1>
         <div className="flex rounded-lg border border-border bg-card p-0.5">
