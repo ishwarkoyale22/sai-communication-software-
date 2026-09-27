@@ -5,13 +5,17 @@
 //    staff member's session/app code current instead of ever serving a stale login screen.
 //  - Hashed build assets (/assets/...): cache-first — their filename changes whenever the content does, so a
 //    cached copy is always correct and this saves a network round trip on every load.
-//  - Everything else (API calls, images, fonts): network passthrough, no caching — this app's data must always
+//  - The brand logo/icon files: cache-first too. They rarely change and a flaky mobile connection failing
+//    to fetch them (leaving a blank circle in the header) is a real, recurring complaint — once one of
+//    these has loaded successfully a single time, it is guaranteed to show on every load after that.
+//  - Everything else (API calls, fonts): network passthrough, no caching — this app's data must always
 //    be live (stock, sales, notifications), never served stale from a cache.
 //
 // Bumping CACHE_NAME (done by publish.mjs on every deploy) forces old caches to be dropped on activate, so a
 // deploy is never stuck behind a stale cached shell.
-const CACHE_NAME = "sai-admin-shell-v1";
-const SHELL_URLS = ["/", "/manifest.webmanifest"];
+const CACHE_NAME = "sai-admin-shell-v2";
+const BRAND_ASSETS = ["/logo-mark.png", "/logo.png", "/favicon-192.png", "/favicon-32.png", "/apple-touch-icon.png"];
+const SHELL_URLS = ["/", "/manifest.webmanifest", ...BRAND_ASSETS];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -47,7 +51,7 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.pathname.startsWith("/assets/")) {
+  if (url.pathname.startsWith("/assets/") || BRAND_ASSETS.includes(url.pathname)) {
     event.respondWith(
       caches.match(req).then((cached) => cached || fetch(req).then((res) => {
         const copy = res.clone();

@@ -40,6 +40,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { NotificationBell } from "./NotificationBell";
+import { BrandLogo } from "./BrandLogo";
 import { InstallAppButton } from "./InstallAppButton";
 
 const NAV_GROUPS: {
@@ -224,7 +225,7 @@ export function Layout() {
 
         <div className="relative flex h-topbar items-center justify-between gap-2.5 px-4">
           <div className="flex items-center gap-2.5 min-w-0">
-            <img src="/logo-mark.png" alt="Sai Communication" className="h-9 w-9 shrink-0 rounded-full shadow-sm" />
+            <BrandLogo className="h-9 w-9 shrink-0 rounded-full shadow-sm" />
             <div className="flex min-w-0 flex-col leading-tight">
               <span className="truncate font-serif text-sm font-semibold text-white">Sai Communication</span>
               <span className="text-[10px] uppercase tracking-wider text-gold/70">Admin Portal</span>
