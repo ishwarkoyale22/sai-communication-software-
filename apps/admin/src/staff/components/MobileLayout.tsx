@@ -4,6 +4,7 @@ import { markNavigation } from "@sai/shared";
 import { Home, Clock, ListChecks, Bell, LogOut } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { SmoothScroll } from "../../components/SmoothScroll";
+import { InstallAppButton } from "../../components/InstallAppButton";
 
 export function MobileLayout() {
   const { staff, signOut, unreadNotifications } = useStaffAuth();
@@ -58,13 +59,16 @@ export function MobileLayout() {
             </div>
             <span className="font-serif text-sm font-semibold text-gray-800">Hi, {firstName}</span>
           </div>
-          <button
-            onClick={() => signOut()}
-            className="relative flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-accent hover:text-brand-danger"
-            aria-label="Sign out"
-          >
-            <LogOut size={15} />
-          </button>
+          <div className="relative flex items-center gap-1.5">
+            <InstallAppButton />
+            <button
+              onClick={() => signOut()}
+              className="flex h-8 w-8 items-center justify-center rounded-full text-gray-400 transition-colors hover:bg-accent hover:text-brand-danger"
+              aria-label="Sign out"
+            >
+              <LogOut size={15} />
+            </button>
+          </div>
         </header>
         <main ref={mainRef} className="flex-1 overflow-y-auto bg-page p-4 pb-20">
           <div ref={mainContentRef}>
