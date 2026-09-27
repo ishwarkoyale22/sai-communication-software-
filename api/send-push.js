@@ -51,9 +51,16 @@ export default async function handler(req, res) {
   await Promise.all(
     subs.map(async (s) => {
       try {
+        // TTL/urgency were left at web-push's defaults (no Urgency header, TTL effectively low). Android
+        // can defer or silently drop a normal-priority push to a device that's idle/in Doze — FCM never
+        // reports this back, so the sender sees success regardless. Explicit "high" urgency plus a real
+        // TTL is what tells FCM/Android this must wake the device and be delivered promptly, not
+        // deprioritized — this was reproducibly the difference between a push landing immediately vs.
+        // never landing at all despite every prior send here reporting success.
         await webpush.sendNotification(
           { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
-          payload
+          payload,
+          { TTL: 60 * 60, urgency: "high" }
         );
         sent++;
       } catch (err) {
