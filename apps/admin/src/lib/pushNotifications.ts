@@ -52,36 +52,46 @@ export async function enablePushNotifications(target: PushTarget): Promise<{ ok:
     return { ok: false, reason: permission === "denied" ? "Notifications are blocked for this site." : "Permission was not granted." };
   }
 
-  const reg = await navigator.serviceWorker.ready;
-  let sub = await reg.pushManager.getSubscription();
-  // A subscription created under a since-rotated VAPID key can never be delivered to again — the push
-  // service itself rejects it. Drop it and subscribe fresh under the current key instead of silently
-  // keeping a dead subscription around.
-  if (sub && uint8ArrayToUrlBase64(sub.options.applicationServerKey) !== VAPID_PUBLIC_KEY) {
-    await sub.unsubscribe();
-    sub = null;
-  }
-  if (!sub) {
-    sub = await reg.pushManager.subscribe({
-      userVisibleOnly: true,
-      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as unknown as BufferSource,
-    });
-  }
+  // Everything past this point can throw for real, device-specific reasons — most notably Safari/iOS,
+  // where pushManager.subscribe() is known to reject (e.g. "InvalidStateError" if the service worker
+  // isn't fully activated yet, or a permission race). Without this try/catch, that rejection propagated
+  // uncaught out of this function: the caller's `await` threw, its `setBusy(false)` never ran, and the
+  // button was left stuck spinning forever with no error shown at all — indistinguishable from nothing
+  // having happened.
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    // A subscription created under a since-rotated VAPID key can never be delivered to again — the push
+    // service itself rejects it. Drop it and subscribe fresh under the current key instead of silently
+    // keeping a dead subscription around.
+    if (sub && uint8ArrayToUrlBase64(sub.options.applicationServerKey) !== VAPID_PUBLIC_KEY) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY) as unknown as BufferSource,
+      });
+    }
 
-  const json = sub.toJSON();
-  const { error } = await supabase.from("push_subscriptions").upsert(
-    {
-      staff_id: "staffId" in target ? target.staffId : null,
-      for_admin: "forAdmin" in target,
-      endpoint: sub.endpoint,
-      p256dh: json.keys?.p256dh ?? "",
-      auth: json.keys?.auth ?? "",
-      user_agent: navigator.userAgent,
-    },
-    { onConflict: "endpoint" }
-  );
-  if (error) return { ok: false, reason: error.message };
-  return { ok: true };
+    const json = sub.toJSON();
+    const { error } = await supabase.from("push_subscriptions").upsert(
+      {
+        staff_id: "staffId" in target ? target.staffId : null,
+        for_admin: "forAdmin" in target,
+        endpoint: sub.endpoint,
+        p256dh: json.keys?.p256dh ?? "",
+        auth: json.keys?.auth ?? "",
+        user_agent: navigator.userAgent,
+      },
+      { onConflict: "endpoint" }
+    );
+    if (error) return { ok: false, reason: error.message };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, reason: err instanceof Error ? err.message : "Could not turn on notifications on this device." };
+  }
 }
 
 /** Whether THIS device already has an active push subscription (independent of Notification.permission,

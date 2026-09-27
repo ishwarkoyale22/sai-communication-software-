@@ -22,12 +22,17 @@ export function EnableNotificationsButton({ target }: { target: PushTarget }) {
   async function handleClick() {
     setBusy(true);
     setMessage(null);
-    const res = await enablePushNotifications(target);
-    setBusy(false);
-    if (res.ok) {
-      setSubscribed(true);
-    } else {
-      setMessage(res.reason);
+    // enablePushNotifications() already catches its own errors and resolves with { ok: false }, but a
+    // second safety net here means a stray future rejection still clears `busy` and shows something,
+    // instead of leaving the button stuck spinning forever with no explanation.
+    try {
+      const res = await enablePushNotifications(target);
+      if (res.ok) setSubscribed(true);
+      else setMessage(res.reason);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Could not turn on notifications on this device.");
+    } finally {
+      setBusy(false);
     }
   }
 
