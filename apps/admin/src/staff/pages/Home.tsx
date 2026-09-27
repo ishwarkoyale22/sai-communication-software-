@@ -10,19 +10,6 @@ import { dbTime } from "../lib/time";
 
 const CONFETTI = ["🎉", "🎈", "🎂", "🎊", "🌸", "✨"];
 
-// "Just now" / "5m ago" / "3h ago" — Instagram-style relative stamps for the notification feed, instead
-// of a plain clock time, so a fresh notification visibly reads as fresh.
-function timeAgo(iso: string): string {
-  const ms = Date.now() - dbTime(iso).getTime();
-  const mins = Math.floor(ms / 60000);
-  if (mins < 1) return "Just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
-}
-
 function greeting() {
   const h = new Date().getHours();
   if (h < 12) return "Good Morning";
@@ -85,31 +72,6 @@ export function Home() {
   const { staff, token, unreadBySection, openAttendance, clockOut, todaysBirthdays, sendBirthdayWish } = useStaffAuth();
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [activity, setActivity] = useState<{ id: string; action: string; created_at: string }[]>([]);
-  // An Instagram-style "recent activity" feed of real notifications (task assigned, leave approved, a
-  // repair assigned to you, etc.) right on Home — not just tucked away in the Alerts tab. Reuses the
-  // exact same RPC the Alerts page already calls; no new backend.
-  interface RecentNotification { id: string; title: string; body: string | null; link: string | null; is_open: boolean; created_at: string }
-  const [recentNotifications, setRecentNotifications] = useState<RecentNotification[]>([]);
-  useEffect(() => {
-    if (!token) return;
-    let alive = true;
-    async function loadNotifications() {
-      const { data } = await supabase.rpc("staff_get_notifications", { p_token: token });
-      if (!alive) return;
-      setRecentNotifications(((data as RecentNotification[]) ?? []).slice(0, 6));
-    }
-    loadNotifications();
-    const channel = staff?.id
-      ? supabase
-          .channel("staff-home-recent-notifications")
-          .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `staff_id=eq.${staff.id}` }, loadNotifications)
-          .subscribe()
-      : null;
-    return () => {
-      alive = false;
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, [token, staff?.id]);
   const [now, setNow] = useState(Date.now());
   // The birthday popup shows once per person per day (remembered on this device),
   // not on every visit to Home.
@@ -220,39 +182,6 @@ export function Home() {
 
   return (
     <div className="space-y-4">
-      {recentNotifications.length > 0 && (
-        <div className="card overflow-hidden p-0">
-          <ul className="divide-y divide-border">
-            {recentNotifications.map((n) => {
-              const row = (
-                <div className="flex items-start gap-2.5 p-3">
-                  <span className="mt-0.5 shrink-0 text-base leading-none">🔔</span>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="truncate text-sm font-semibold text-gray-800">{n.title}</span>
-                      {n.is_open && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
-                    </div>
-                    {n.body && <div className="truncate text-xs text-gray-600">{n.body}</div>}
-                    <div className="mt-0.5 text-[11px] text-gray-400">{timeAgo(n.created_at)}</div>
-                  </div>
-                </div>
-              );
-              return (
-                <li key={n.id}>
-                  {n.link ? (
-                    <Link to={n.link} className="block hover:bg-accent">
-                      {row}
-                    </Link>
-                  ) : (
-                    row
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
-
       {ownBirthday && showCelebration && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
           <div className="relative w-full max-w-xs overflow-hidden rounded-2xl bg-gradient-to-br from-gold via-gold to-goldDim p-6 text-center text-white shadow-xl">
