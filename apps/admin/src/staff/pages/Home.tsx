@@ -2,13 +2,26 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Clock, LogOut, Users, FileText, ListChecks, CalendarClock, Star, History, CalendarDays, Wrench, Wallet,
-  PartyPopper, X, Package, MessageSquareText, Tag, Gift, ShoppingBag, Receipt, Target, UserPlus, Bell,
+  PartyPopper, X, Package, MessageSquareText, Tag, Gift, ShoppingBag, Receipt, Target, UserPlus,
 } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
 import { dbTime } from "../lib/time";
 
 const CONFETTI = ["🎉", "🎈", "🎂", "🎊", "🌸", "✨"];
+
+// "Just now" / "5m ago" / "3h ago" — Instagram-style relative stamps for the notification feed, instead
+// of a plain clock time, so a fresh notification visibly reads as fresh.
+function timeAgo(iso: string): string {
+  const ms = Date.now() - dbTime(iso).getTime();
+  const mins = Math.floor(ms / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
 
 function greeting() {
   const h = new Date().getHours();
@@ -207,6 +220,39 @@ export function Home() {
 
   return (
     <div className="space-y-4">
+      {recentNotifications.length > 0 && (
+        <div className="card overflow-hidden p-0">
+          <ul className="divide-y divide-border">
+            {recentNotifications.map((n) => {
+              const row = (
+                <div className="flex items-start gap-2.5 p-3">
+                  <span className="mt-0.5 shrink-0 text-base leading-none">🔔</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="truncate text-sm font-semibold text-gray-800">{n.title}</span>
+                      {n.is_open && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
+                    </div>
+                    {n.body && <div className="truncate text-xs text-gray-600">{n.body}</div>}
+                    <div className="mt-0.5 text-[11px] text-gray-400">{timeAgo(n.created_at)}</div>
+                  </div>
+                </div>
+              );
+              return (
+                <li key={n.id}>
+                  {n.link ? (
+                    <Link to={n.link} className="block hover:bg-accent">
+                      {row}
+                    </Link>
+                  ) : (
+                    row
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
       {ownBirthday && showCelebration && (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4">
           <div className="relative w-full max-w-xs overflow-hidden rounded-2xl bg-gradient-to-br from-gold via-gold to-goldDim p-6 text-center text-white shadow-xl">
@@ -333,41 +379,6 @@ export function Home() {
           </Link>
         ))}
       </div>
-
-      {recentNotifications.length > 0 && (
-        <div className="card p-4">
-          <h3 className="mb-2 flex items-center gap-1.5 font-serif text-sm font-semibold text-gray-700">
-            <Bell size={15} className="text-gold" /> Notifications
-          </h3>
-          <ul className="divide-y divide-border">
-            {recentNotifications.map((n) => {
-              const row = (
-                <div className="flex items-start gap-2 py-1.5 text-xs">
-                  {n.is_open && <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
-                  <div className={`min-w-0 flex-1 ${n.is_open ? "" : "pl-3.5"}`}>
-                    <div className="truncate font-medium text-gray-700">{n.title}</div>
-                    {n.body && <div className="truncate text-gray-500">{n.body}</div>}
-                  </div>
-                  <span className="shrink-0 whitespace-nowrap text-gray-400">
-                    {dbTime(n.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                  </span>
-                </div>
-              );
-              return (
-                <li key={n.id}>
-                  {n.link ? (
-                    <Link to={n.link} className="-mx-1 block rounded-md px-1 hover:bg-accent">
-                      {row}
-                    </Link>
-                  ) : (
-                    row
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
 
       {role !== "technician" && role !== "sales" && role !== "receptionist" && (
         <div className="card p-4">
