@@ -40,7 +40,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { NotificationBell } from "./NotificationBell";
-import { InstallAppButton } from "./InstallAppButton";
 
 const NAV_GROUPS: {
   label: string;
@@ -325,7 +324,6 @@ export function Layout() {
             <div className="truncate font-serif text-sm font-medium text-gray-700">Admin Portal</div>
           </div>
           <div className="flex items-center gap-2">
-            <InstallAppButton />
             <NotificationBell />
             <div
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-xs font-bold shadow-sm"
