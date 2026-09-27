@@ -11,9 +11,15 @@
 //  - Everything else (API calls, fonts): network passthrough, no caching — this app's data must always
 //    be live (stock, sales, notifications), never served stale from a cache.
 //
-// Bumping CACHE_NAME (done by publish.mjs on every deploy) forces old caches to be dropped on activate, so a
-// deploy is never stuck behind a stale cached shell.
-const CACHE_NAME = "sai-admin-shell-v2";
+// __BUILD_ID__ is replaced with a fresh value on every build (see scripts/stamp-sw.mjs), so this file's
+// bytes differ on every deploy even when no line here changed by hand. That is what makes the browser
+// notice there is a new service worker at all: Chrome only re-checks sw.js occasionally and compares it
+// byte-for-byte to decide whether anything changed — an unchanged sw.js means Chrome never installs the
+// new one, so a tab can keep running OLD app code against an OLD cache indefinitely, well past the point
+// a new version has actually deployed. A fresh CACHE_NAME every build guarantees Chrome always sees a
+// change, runs through install → activate (dropping every older cache), and fires `controllerchange` —
+// which main.tsx uses to reload that tab onto the new code automatically.
+const CACHE_NAME = "sai-admin-shell-__BUILD_ID__";
 const BRAND_ASSETS = ["/logo-mark.png", "/logo.png", "/favicon-192.png", "/favicon-32.png", "/apple-touch-icon.png"];
 const SHELL_URLS = ["/", "/manifest.webmanifest", ...BRAND_ASSETS];
 
