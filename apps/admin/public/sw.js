@@ -84,6 +84,11 @@ self.addEventListener("push", (event) => {
       badge: "/favicon-192.png",
       data: { link: data.link },
       tag: data.link, // a second notification for the same page replaces the first instead of stacking
+      renotify: true, // ...but still alert (sound/vibrate/wake the lock screen) on that replacement —
+      // without this, the Notification API's default for a tag replacement is a SILENT update, which is
+      // why only the very first push for a given link ever lit up the lock screen and every push after it
+      // (the vast majority in practice — the same staff member getting a second task, a third, etc., all
+      // sharing the "/portal/tasks" tag) just swapped the tray entry with nothing shown on a locked phone.
     })
   );
 });
