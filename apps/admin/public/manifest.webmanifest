@@ -1,0 +1,16 @@
+{
+  "name": "Sai Communication — Admin",
+  "short_name": "Sai Admin",
+  "description": "Sai Communication retail ERP — admin and staff portal.",
+  "start_url": "/?source=pwa",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F7F3EC",
+  "theme_color": "#1F3A8A",
+  "icons": [
+    { "src": "/favicon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
