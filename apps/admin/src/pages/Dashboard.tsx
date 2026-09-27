@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { IndianRupee, Package, Wrench, ShoppingBag, Receipt, TrendingUp, Boxes, AlertTriangle, Trophy, Target, Save } from "lucide-react";
+import { IndianRupee, Package, Wrench, ShoppingBag, Receipt, TrendingUp, Boxes, AlertTriangle, Trophy, Target, Save, Bell } from "lucide-react";
 import { formatCurrency, formatDateTime, computePaymentSplit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { StatusPill } from "../components/StatusPill";
@@ -125,6 +125,26 @@ export function Dashboard() {
   // after that happen quietly so the page doesn't re-flash every time any
   // shopper anywhere places an order.
   const [initialLoading, setInitialLoading] = useState(true);
+
+  // A separate, self-contained feed — an Instagram-style "recent activity" list right on the Home
+  // screen, not just tucked away in the header bell or a separate Alerts page. Reuses the exact same
+  // RPC the bell already calls; no new backend, no change to the bell itself.
+  interface RecentNotification { id: string; title: string; body: string | null; link: string | null; is_open: boolean; created_at: string }
+  const [recentNotifications, setRecentNotifications] = useState<RecentNotification[]>([]);
+  useEffect(() => {
+    async function loadNotifications() {
+      const { data } = await supabase.rpc("admin_notifications_with_open_status");
+      setRecentNotifications(((data as RecentNotification[]) ?? []).slice(0, 6));
+    }
+    loadNotifications();
+    const channel = supabase
+      .channel("dashboard-recent-notifications")
+      .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: "for_admin=eq.true" }, loadNotifications)
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     load();
@@ -461,6 +481,42 @@ export function Dashboard() {
               return c.to ? <Link key={c.label} to={c.to}>{Card}</Link> : <div key={c.label}>{Card}</div>;
             })}
       </div>
+
+      {recentNotifications.length > 0 && (
+        <div className="card p-4">
+          <div className="mb-3 flex items-center gap-2 font-serif text-sm font-semibold text-gray-700">
+            <span className="flex h-6 w-6 items-center justify-center rounded-md bg-brand-primary/12 text-brand-primary">
+              <Bell size={13} strokeWidth={2} />
+            </span>
+            Recent Notifications
+          </div>
+          <ul className="divide-y divide-border">
+            {recentNotifications.map((n) => {
+              const row = (
+                <div className="flex items-start gap-2 py-2 text-sm">
+                  {n.is_open && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
+                  <div className={`min-w-0 flex-1 ${n.is_open ? "" : "pl-3.5"}`}>
+                    <div className="truncate font-medium text-gray-800">{n.title}</div>
+                    {n.body && <div className="truncate text-xs text-gray-500">{n.body}</div>}
+                  </div>
+                  <div className="shrink-0 whitespace-nowrap text-[11px] text-gray-400">{formatDateTime(n.created_at)}</div>
+                </div>
+              );
+              return (
+                <li key={n.id}>
+                  {n.link ? (
+                    <Link to={n.link} className="-mx-1 block rounded-md px-1 hover:bg-accent">
+                      {row}
+                    </Link>
+                  ) : (
+                    row
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       <GiftsOverview period={period} since={periodStart(period)} />
 

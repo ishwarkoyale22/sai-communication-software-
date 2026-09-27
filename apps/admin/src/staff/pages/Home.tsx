@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import {
   Clock, LogOut, Users, FileText, ListChecks, CalendarClock, Star, History, CalendarDays, Wrench, Wallet,
-  PartyPopper, X, Package, MessageSquareText, Tag, Gift, ShoppingBag, Receipt, Target, UserPlus,
+  PartyPopper, X, Package, MessageSquareText, Tag, Gift, ShoppingBag, Receipt, Target, UserPlus, Bell,
 } from "lucide-react";
 import { useStaffAuth } from "../context/StaffAuthContext";
 import { supabase } from "../lib/supabase";
@@ -72,6 +72,31 @@ export function Home() {
   const { staff, token, unreadBySection, openAttendance, clockOut, todaysBirthdays, sendBirthdayWish } = useStaffAuth();
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [activity, setActivity] = useState<{ id: string; action: string; created_at: string }[]>([]);
+  // An Instagram-style "recent activity" feed of real notifications (task assigned, leave approved, a
+  // repair assigned to you, etc.) right on Home — not just tucked away in the Alerts tab. Reuses the
+  // exact same RPC the Alerts page already calls; no new backend.
+  interface RecentNotification { id: string; title: string; body: string | null; link: string | null; is_open: boolean; created_at: string }
+  const [recentNotifications, setRecentNotifications] = useState<RecentNotification[]>([]);
+  useEffect(() => {
+    if (!token) return;
+    let alive = true;
+    async function loadNotifications() {
+      const { data } = await supabase.rpc("staff_get_notifications", { p_token: token });
+      if (!alive) return;
+      setRecentNotifications(((data as RecentNotification[]) ?? []).slice(0, 6));
+    }
+    loadNotifications();
+    const channel = staff?.id
+      ? supabase
+          .channel("staff-home-recent-notifications")
+          .on("postgres_changes", { event: "*", schema: "public", table: "notifications", filter: `staff_id=eq.${staff.id}` }, loadNotifications)
+          .subscribe()
+      : null;
+    return () => {
+      alive = false;
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [token, staff?.id]);
   const [now, setNow] = useState(Date.now());
   // The birthday popup shows once per person per day (remembered on this device),
   // not on every visit to Home.
@@ -308,6 +333,41 @@ export function Home() {
           </Link>
         ))}
       </div>
+
+      {recentNotifications.length > 0 && (
+        <div className="card p-4">
+          <h3 className="mb-2 flex items-center gap-1.5 font-serif text-sm font-semibold text-gray-700">
+            <Bell size={15} className="text-gold" /> Notifications
+          </h3>
+          <ul className="divide-y divide-border">
+            {recentNotifications.map((n) => {
+              const row = (
+                <div className="flex items-start gap-2 py-1.5 text-xs">
+                  {n.is_open && <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-primary" />}
+                  <div className={`min-w-0 flex-1 ${n.is_open ? "" : "pl-3.5"}`}>
+                    <div className="truncate font-medium text-gray-700">{n.title}</div>
+                    {n.body && <div className="truncate text-gray-500">{n.body}</div>}
+                  </div>
+                  <span className="shrink-0 whitespace-nowrap text-gray-400">
+                    {dbTime(n.created_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
+                  </span>
+                </div>
+              );
+              return (
+                <li key={n.id}>
+                  {n.link ? (
+                    <Link to={n.link} className="-mx-1 block rounded-md px-1 hover:bg-accent">
+                      {row}
+                    </Link>
+                  ) : (
+                    row
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {role !== "technician" && role !== "sales" && role !== "receptionist" && (
         <div className="card p-4">
