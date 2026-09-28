@@ -123,7 +123,7 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     // visible (see the push handler) — refresh the badge the same way the realtime insert above does.
     function onSwMessage(event: MessageEvent) {
       if (event.data?.type === "PUSH_RECEIVED") {
-        refreshNotificationsFor(token);
+        refreshNotificationsFor(token!);
       }
     }
     navigator.serviceWorker?.addEventListener("message", onSwMessage);
