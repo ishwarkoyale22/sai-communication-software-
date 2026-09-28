@@ -147,6 +147,21 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Refresh badge + notifications when app comes back to foreground
+  // (Realtime reconnects but does not replay missed events —
+  // a fresh fetch is needed to catch anything that happened while backgrounded)
+  useEffect(() => {
+    if (!token) return;
+    function onVisible() {
+      if (document.visibilityState === "visible") {
+        refreshNotificationsFor(token!);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
   // App icon badge (Badging API) — the WhatsApp-style red count on the home-screen icon, on top
   // of the in-app tile badges above and the lock-screen push. Only installed PWAs on Chromium
   // browsers implement this (not in lib.dom.d.ts yet, hence the cast); iOS Safari and a plain
