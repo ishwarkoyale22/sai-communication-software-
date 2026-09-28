@@ -118,8 +118,19 @@ export function StaffAuthProvider({ children }: { children: ReactNode }) {
         refreshNotificationsFor(token)
       )
       .subscribe();
+
+    // sw.js skips the OS notification and posts here instead when this tab is already open and
+    // visible (see the push handler) — refresh the badge the same way the realtime insert above does.
+    function onSwMessage(event: MessageEvent) {
+      if (event.data?.type === "PUSH_RECEIVED") {
+        refreshNotificationsFor(token);
+      }
+    }
+    navigator.serviceWorker?.addEventListener("message", onSwMessage);
+
     return () => {
       supabase.removeChannel(channel);
+      navigator.serviceWorker?.removeEventListener("message", onSwMessage);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [staff?.id, token]);

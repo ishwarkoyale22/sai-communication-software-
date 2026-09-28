@@ -77,20 +77,36 @@ self.addEventListener("push", (event) => {
   } catch {
     /* not JSON — keep the defaults */
   }
+
   event.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
-      icon: "/logo.png",
-      badge: "/favicon-192.png",
-      data: { link: data.link },
-      tag: data.link, // a second notification for the same page replaces the first instead of stacking
-      renotify: true, // ...but still alert (sound/vibrate/wake the lock screen) on that replacement —
-      // without this, the Notification API's default for a tag replacement is a SILENT update, which is
-      // why only the very first push for a given link ever lit up the lock screen and every push after it
-      // (the vast majority in practice — the same staff member getting a second task, a third, etc., all
-      // sharing the "/portal/tasks" tag) just swapped the tray entry with nothing shown on a locked phone.
-      vibrate: [300, 100, 300, 100, 300], // Active vibration pattern — signals Android to treat this as an Alerting / High-Priority notification
-      requireInteraction: true,           // Keeps the notification visible until user interacts with it
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      // A visible, focused tab already has this data live (or can fetch it) — showing an OS
+      // notification on top of an open app is redundant/annoying. Tell that tab directly instead
+      // and skip the system notification; a closed or backgrounded app has no tab to tell, so it
+      // falls through to the real notification below.
+      const focusedClient = clients.find(
+        (c) => new URL(c.url).origin === self.location.origin && c.visibilityState === "visible"
+      );
+
+      if (focusedClient) {
+        focusedClient.postMessage({ type: "PUSH_RECEIVED", data });
+        return;
+      }
+
+      return self.registration.showNotification(data.title, {
+        body: data.body,
+        icon: "/logo.png",
+        badge: "/favicon-192.png",
+        data: { link: data.link },
+        tag: data.link, // a second notification for the same page replaces the first instead of stacking
+        renotify: true, // ...but still alert (sound/vibrate/wake the lock screen) on that replacement —
+        // without this, the Notification API's default for a tag replacement is a SILENT update, which is
+        // why only the very first push for a given link ever lit up the lock screen and every push after it
+        // (the vast majority in practice — the same staff member getting a second task, a third, etc., all
+        // sharing the "/portal/tasks" tag) just swapped the tray entry with nothing shown on a locked phone.
+        vibrate: [300, 100, 300, 100, 300], // Active vibration pattern — signals Android to treat this as an Alerting / High-Priority notification
+        requireInteraction: true,           // Keeps the notification visible until user interacts with it
+      });
     })
   );
 });
