@@ -94,14 +94,32 @@ export async function enablePushNotifications(target: PushTarget): Promise<{ ok:
   }
 }
 
-/** Whether THIS device already has an active push subscription (independent of Notification.permission,
- * which can be "granted" while the subscription itself was never created or was later revoked). */
-export async function isPushSubscribed(): Promise<boolean> {
+/** Whether THIS device is subscribed for THIS target specifically (independent of
+ * Notification.permission, which can be "granted" while the subscription itself was never created
+ * or was later revoked).
+ *
+ * A device only ever holds one push subscription per origin — Admin and Staff on the same phone
+ * share that one slot. Checking only "does a valid subscription exist" (as this used to) meant that
+ * once ANY role had subscribed on a device, the button hid itself for every other role too, even
+ * though the DB row still pointed at the first role: e.g. Admin enables notifications on a phone,
+ * then Staff logs into the same phone and the button never reappears, so Staff's own staff_id is
+ * never saved — task-assigned pushes for that person silently find zero subscriptions while Admin's
+ * keep working on the same device. Checking the row's actual owner is what tells them apart.
+ */
+export async function isPushSubscribed(target: PushTarget): Promise<boolean> {
   if (!pushSupported() || Notification.permission !== "granted") return false;
   try {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
-    return !!sub && uint8ArrayToUrlBase64(sub.options.applicationServerKey) === VAPID_PUBLIC_KEY;
+    if (!sub || uint8ArrayToUrlBase64(sub.options.applicationServerKey) !== VAPID_PUBLIC_KEY) return false;
+
+    const { data } = await supabase
+      .from("push_subscriptions")
+      .select("staff_id, for_admin")
+      .eq("endpoint", sub.endpoint)
+      .maybeSingle();
+    if (!data) return false;
+    return "staffId" in target ? data.staff_id === target.staffId : data.for_admin === true;
   } catch {
     return false;
   }

@@ -14,7 +14,8 @@ export function EnableNotificationsButton({ target }: { target: PushTarget }) {
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    isPushSubscribed().then(setSubscribed);
+    isPushSubscribed(target).then(setSubscribed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!pushSupported() || subscribed === null || subscribed) return null;
