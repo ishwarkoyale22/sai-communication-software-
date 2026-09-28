@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { formatDateTime } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
-import { FileText, Download } from "lucide-react";
+import { FileText, Eye, Download } from "lucide-react";
 
 interface Staff {
   id: string;
@@ -53,6 +53,33 @@ export function FinanceReports() {
     window.open(data.signedUrl, "_blank", "noopener");
   }
 
+  // A plain link/window.open to a signed URL just navigates/previews it (a PDF opens in the browser's
+  // own viewer instead of saving) — the signed URL is cross-origin, so a `download` attribute on it is
+  // ignored by the browser. Fetching the bytes ourselves and downloading from a same-origin blob: URL is
+  // what actually forces a save-to-disk regardless of file type.
+  async function downloadFile(path: string, title: string) {
+    const { data, error } = await supabase.storage.from("finance-reports").createSignedUrl(path, 300);
+    if (error || !data?.signedUrl) {
+      window.alert(error?.message || "Could not download the file.");
+      return;
+    }
+    try {
+      const res = await fetch(data.signedUrl);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const ext = path.includes(".") ? path.slice(path.lastIndexOf(".")) : "";
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `${title}${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.alert("Could not download the file.");
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -92,9 +119,14 @@ export function FinanceReports() {
                   <td className="max-w-xs truncate text-gray-500">{r.notes ?? "-"}</td>
                   <td className="text-right">
                     {r.file_url ? (
-                      <button type="button" onClick={() => openFile(r.file_url!)} className="btn-secondary inline-flex !px-2 !py-1 text-xs">
-                        <Download size={13} /> View / Download
-                      </button>
+                      <div className="inline-flex gap-1.5">
+                        <button type="button" onClick={() => openFile(r.file_url!)} className="btn-secondary inline-flex !px-2 !py-1 text-xs">
+                          <Eye size={13} /> View
+                        </button>
+                        <button type="button" onClick={() => downloadFile(r.file_url!, r.title)} className="btn-secondary inline-flex !px-2 !py-1 text-xs">
+                          <Download size={13} /> Download
+                        </button>
+                      </div>
                     ) : (
                       <span className="text-xs text-gray-400">No file</span>
                     )}
