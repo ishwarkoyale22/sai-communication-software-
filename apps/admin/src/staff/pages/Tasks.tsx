@@ -25,6 +25,21 @@ export function TasksPage() {
 
   useEffect(() => {
     load();
+
+    const channel = supabase
+      .channel("staff-tasks-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "staff_tasks" },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [token]);
 
   async function load() {
