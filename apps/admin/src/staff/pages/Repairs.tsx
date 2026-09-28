@@ -37,7 +37,7 @@ const STATUS_OPTIONS = ["received", "in_repair", "waiting_parts", "completed", "
 const OPEN_STATUSES = ["received", "in_repair", "waiting_parts"];
 
 export function RepairsPage() {
-  const { token } = useStaffAuth();
+  const { token, staff } = useStaffAuth();
   const [repairs, setRepairs] = useState<Repair[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
@@ -47,7 +47,25 @@ export function RepairsPage() {
 
   useEffect(() => {
     load();
-  }, [token]);
+
+    // repairs has no "staff_id" column — the staff-assignment column is technician_id
+    // (confirmed against the live schema; staff_get_repairs itself filters on it).
+    const channel = supabase
+      .channel("staff-repairs-page-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "repairs", filter: `technician_id=eq.${staff?.id}` },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, staff?.id]);
 
   async function load() {
     if (!token) return;

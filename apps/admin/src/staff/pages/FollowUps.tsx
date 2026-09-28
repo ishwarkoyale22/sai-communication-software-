@@ -32,7 +32,7 @@ const TABS = [
 ] as const;
 
 export function FollowUps() {
-  const { token } = useStaffAuth();
+  const { token, staff } = useStaffAuth();
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [tab, setTab] = useState<(typeof TABS)[number]["key"]>("today");
@@ -53,8 +53,23 @@ export function FollowUps() {
 
   useEffect(() => {
     load();
+
+    const channel = supabase
+      .channel("staff-followups-page-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "follow_ups", filter: `staff_id=eq.${staff?.id}` },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, staff?.id]);
 
   async function create() {
     if (!token || !form.customer_id || !form.follow_up_date || !form.reason.trim()) {

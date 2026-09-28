@@ -44,7 +44,7 @@ const ICON: Record<NotificationType, typeof Bell> = {
 };
 
 export function Notifications() {
-  const { token, refreshNotifications } = useStaffAuth();
+  const { token, staff, refreshNotifications } = useStaffAuth();
   const navigate = useNavigate();
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
@@ -58,8 +58,23 @@ export function Notifications() {
 
   useEffect(() => {
     load();
+
+    const channel = supabase
+      .channel("staff-notifications-page-realtime")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "notifications", filter: `staff_id=eq.${staff?.id}` },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, staff?.id]);
 
   async function openNotification(n: Notification) {
     if (!n.is_read) {

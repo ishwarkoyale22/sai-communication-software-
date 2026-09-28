@@ -27,12 +27,33 @@ export function OrdersView() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  async function load() {
     if (!token) return;
-    supabase.rpc("staff_get_website_orders", { p_token: token }).then(({ data }) => {
-      setOrders((data as Order[]) ?? []);
-      setLoading(false);
-    });
+    const { data } = await supabase.rpc("staff_get_website_orders", { p_token: token });
+    setOrders((data as Order[]) ?? []);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    load();
+
+    // website_orders has no staff column — every staff member sees the same shared list
+    // (matches staff_get_website_orders itself, which returns all orders unfiltered).
+    const channel = supabase
+      .channel("staff-orders-page-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "website_orders" },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   return (

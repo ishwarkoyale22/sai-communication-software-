@@ -29,6 +29,23 @@ export function Enquiries() {
 
   useEffect(() => {
     load();
+
+    // enquiries has no staff/assignment column at all (confirmed against the live schema) —
+    // staff_get_enquiries itself returns every enquiry unfiltered, so this mirrors that: no filter.
+    const channel = supabase
+      .channel("staff-enquiries-page-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "enquiries" },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 

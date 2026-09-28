@@ -28,7 +28,7 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 export function LeavePage() {
-  const { token } = useStaffAuth();
+  const { token, staff } = useStaffAuth();
   const [requests, setRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -38,7 +38,23 @@ export function LeavePage() {
 
   useEffect(() => {
     load();
-  }, [token]);
+
+    const channel = supabase
+      .channel("staff-leave-page-realtime")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "leave_requests", filter: `staff_id=eq.${staff?.id}` },
+        () => {
+          load();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, staff?.id]);
 
   async function load() {
     if (!token) return;
