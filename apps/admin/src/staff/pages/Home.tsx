@@ -43,6 +43,7 @@ const TECHNICIAN_LINKS: LinkDef[] = [
   { to: "/portal/repairs", label: "My Repairs", icon: Wrench, tile: "card-purple", iconColor: "text-purple-600" },
   { to: "/portal/tasks", label: "Tasks", icon: ListChecks, tile: "card-amber", iconColor: "text-amber-600" },
   { to: "/portal/leave", label: "Leave", icon: CalendarDays, tile: "card-green", iconColor: "text-brand-success" },
+  { to: "/portal/finance-reports", label: "Finance Reports", icon: Wallet, tile: "card-green", iconColor: "text-brand-success" },
 ];
 
 const SALES_LINKS: LinkDef[] = [
@@ -56,6 +57,7 @@ const SALES_LINKS: LinkDef[] = [
   { to: "/portal/targets", label: "Performance", icon: Target, tile: "card-amber", iconColor: "text-amber-600" },
   { to: "/portal/tasks", label: "Tasks", icon: ListChecks, tile: "card-purple", iconColor: "text-purple-600" },
   { to: "/portal/leave", label: "Leave", icon: CalendarDays, tile: "card-green", iconColor: "text-brand-success" },
+  { to: "/portal/finance-reports", label: "Finance Reports", icon: Wallet, tile: "card-green", iconColor: "text-brand-success" },
 ];
 
 const RECEPTIONIST_LINKS: LinkDef[] = [
@@ -66,6 +68,7 @@ const RECEPTIONIST_LINKS: LinkDef[] = [
   { to: "/portal/reviews", label: "Feedback", icon: Star, tile: "card-gold", iconColor: "text-gold" },
   { to: "/portal/tasks", label: "Tasks", icon: ListChecks, tile: "card-amber", iconColor: "text-amber-600" },
   { to: "/portal/leave", label: "Leave", icon: CalendarDays, tile: "card-green", iconColor: "text-brand-success" },
+  { to: "/portal/finance-reports", label: "Finance Reports", icon: Wallet, tile: "card-green", iconColor: "text-brand-success" },
 ];
 
 export function Home() {
