@@ -23,6 +23,14 @@ export function TasksPage() {
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
+  async function load(quiet = false) {
+    if (!token) return;
+    if (!quiet) setLoading(true);
+    const { data } = await supabase.rpc("staff_get_tasks", { p_token: token });
+    setTasks((data as Task[]) ?? []);
+    setLoading(false);
+  }
+
   useEffect(() => {
     load();
 
@@ -32,23 +40,25 @@ export function TasksPage() {
         "postgres_changes",
         { event: "*", schema: "public", table: "staff_tasks" },
         () => {
-          load();
+          load(true);
         }
       )
       .subscribe();
 
+    function onVisible() {
+      if (document.visibilityState === "visible") {
+        load(true);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
     return () => {
       supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
     };
   }, [token]);
-
-  async function load() {
-    if (!token) return;
-    setLoading(true);
-    const { data } = await supabase.rpc("staff_get_tasks", { p_token: token });
-    setTasks((data as Task[]) ?? []);
-    setLoading(false);
-  }
 
   async function updateStatus(taskId: string, status: string) {
     if (!token) return;

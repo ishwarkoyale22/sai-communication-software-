@@ -49,8 +49,9 @@ export function Notifications() {
   const [items, setItems] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
 
-  async function load() {
+  async function load(quiet = false) {
     if (!token) return;
+    if (!quiet) setLoading(true);
     const { data } = await supabase.rpc("staff_get_notifications", { p_token: token });
     setItems((data as Notification[]) || []);
     setLoading(false);
@@ -65,13 +66,23 @@ export function Notifications() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "notifications", filter: `staff_id=eq.${staff?.id}` },
         () => {
-          load();
+          load(true);
         }
       )
       .subscribe();
 
+    function onVisible() {
+      if (document.visibilityState === "visible") {
+        load(true);
+      }
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+
     return () => {
       supabase.removeChannel(channel);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, staff?.id]);
