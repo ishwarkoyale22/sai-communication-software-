@@ -404,6 +404,9 @@ export function Inventory() {
   const excelInputRef = useRef<HTMLInputElement>(null);
   // Scan mode — live camera decode.
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const lastScanRef = useRef<{ text: string; at: number } | null>(null);
+  const [torchSupported, setTorchSupported] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
   const [scanActive, setScanActive] = useState(false);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [scannedPending, setScannedPending] = useState<{ imei_1: string; imei_2: string; serial_no: string }[]>([]);
@@ -736,16 +739,60 @@ export function Inventory() {
     try {
       setScanActive(true);
       await waitForElement("imei-scanner-region");
-      const scanner = new Html5Qrcode("imei-scanner-region");
+      const scanner = new Html5Qrcode("imei-scanner-region", {
+        formatsToSupport: [
+          Html5QrcodeSupportedFormats.CODE_128,
+          Html5QrcodeSupportedFormats.CODE_39,
+          Html5QrcodeSupportedFormats.EAN_13,
+          Html5QrcodeSupportedFormats.EAN_8,
+          Html5QrcodeSupportedFormats.UPC_A,
+          Html5QrcodeSupportedFormats.UPC_E,
+          Html5QrcodeSupportedFormats.ITF,
+          Html5QrcodeSupportedFormats.QR_CODE,
+        ],
+        useBarCodeDetectorIfSupported: true,
+        verbose: false,
+      });
       scannerRef.current = scanner;
+      lastScanRef.current = null;
       await scanner.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: 250 },
-        (decoded) => onScanDecoded(decoded),
+        {
+          fps: 15,
+          // Wide and short so 1D barcodes (IMEI on a phone box) aren't cropped by a square box.
+          qrbox: (w: number, h: number) => ({
+            width: Math.floor(w * 0.9),
+            height: Math.floor(Math.min(h * 0.5, w * 0.4)),
+          }),
+          videoConstraints: {
+            facingMode: "environment",
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            advanced: [{ focusMode: "continuous" } as any],
+          },
+        },
+        (decoded) => {
+          // Same barcode is re-decoded on every frame while it stays in view; ignore repeats for 2.5s.
+          const now = Date.now();
+          const last = lastScanRef.current;
+          if (last && last.text === decoded && now - last.at < 2500) return;
+          lastScanRef.current = { text: decoded, at: now };
+          try {
+            navigator.vibrate?.(60);
+          } catch {
+            /* vibration unsupported */
+          }
+          onScanDecoded(decoded);
+        },
         () => {
           /* per-frame errors are noise, don't surface */
         }
       );
+      try {
+        setTorchSupported(!!(scanner.getRunningTrackCapabilities() as any)?.torch);
+      } catch {
+        setTorchSupported(false);
+      }
     } catch (err: any) {
       setScanActive(false);
       scannerRef.current = null;
@@ -770,6 +817,19 @@ export function Inventory() {
     }
     scannerRef.current = null;
     setScanActive(false);
+    setTorchOn(false);
+    setTorchSupported(false);
+  }
+
+  async function toggleTorch() {
+    const scanner = scannerRef.current;
+    if (!scanner) return;
+    try {
+      await scanner.applyVideoConstraints({ advanced: [{ torch: !torchOn } as any] });
+      setTorchOn(!torchOn);
+    } catch {
+      setTorchSupported(false);
+    }
   }
 
   async function onScanDecoded(text: string) {
@@ -2062,6 +2122,11 @@ export function Inventory() {
                         ) : (
                           <>
                             <div id="imei-scanner-region" className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
+                            {torchSupported && (
+                              <button type="button" className="btn-secondary mt-2 w-full text-xs" onClick={toggleTorch}>
+                                {torchOn ? "Torch On" : "Torch Off"}
+                              </button>
+                            )}
                             <button type="button" className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
                               Stop Camera
                             </button>
@@ -2411,9 +2476,16 @@ export function Inventory() {
                     <Camera size={13} /> Start Camera
                   </button>
                 ) : (
-                  <button className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
-                    Stop Camera
-                  </button>
+                  <>
+                    {torchSupported && (
+                      <button className="btn-secondary mt-2 w-full text-xs" onClick={toggleTorch}>
+                        {torchOn ? "Torch On" : "Torch Off"}
+                      </button>
+                    )}
+                    <button className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
+                      Stop Camera
+                    </button>
+                  </>
                 )}
                 {scanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{scanFeedback}</p>}
                 {scannedPending.length > 0 && (
