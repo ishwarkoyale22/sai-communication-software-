@@ -12,6 +12,8 @@ export interface EInvoiceSummary {
   itemCount?: number;
   mainHsn?: string;
   irn?: string;
+  // Not in the QR — read from the printed invoice text (best effort, always editable).
+  sellerName?: string;
 }
 
 export interface InvoiceLine {
@@ -20,6 +22,20 @@ export interface InvoiceLine {
   unitCost: number;
   amount: number;
   hsn?: string;
+  gstRate?: number;
+  discountPct?: number;
+  /** IMEIs printed under the item (the "Batch:" line on Samsung-style invoices). */
+  imeis?: string[];
+}
+
+export interface InvoiceHeaderGuess {
+  sellerName?: string;
+  sellerGstin?: string;
+  buyerGstin?: string;
+  invoiceNumber?: string;
+  invoiceDate?: string;
+  totalValue?: number;
+  eWayBill?: string;
 }
 
 function b64urlToString(part: string): string {
@@ -57,11 +73,31 @@ const DECIMAL_RE = /^\d[\d,]*\.\d{1,2}$/;
 const num = (t: string) => Number(t.replace(/,/g, ""));
 
 /** Turns invoice text lines into item rows. Best effort — layouts differ per wholesaler. */
+/** IMEIs on a "Batch: 3517…" / "IMEI: …" line, or a line that is nothing but a 15-digit number. */
+function extractImeis(line: string): string[] {
+  const l = line.trim();
+  const labelled = l.match(/^(?:batch|imei\s*\d?|serial(?:\s*no)?|s\/?n)\s*[:.-]?\s*(.*)$/i);
+  const body = labelled ? labelled[1] : /^[\d\s,/]+$/.test(l) ? l : "";
+  if (!body) return [];
+  // OCR often puts a space inside a number; take 15-digit runs after removing separators between digits.
+  return (body.replace(/(\d)[\s-]+(?=\d)/g, "$1").match(/\d{15}/g) ?? []).filter((v, i, a) => a.indexOf(v) === i);
+}
+
+/** "18 %" / "18%" tokens in order: the first is the GST rate, the second the discount. */
+function percentValues(line: string): number[] {
+  return [...line.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) => Number(m[1]));
+}
+
 export function parseInvoiceLines(lines: string[]): InvoiceLine[] {
   const rows: InvoiceLine[] = [];
   let last: InvoiceLine | null = null;
 
   for (const line of lines) {
+    const imeis = last ? extractImeis(line) : [];
+    if (last && imeis.length) {
+      last.imeis = [...new Set([...(last.imeis ?? []), ...imeis])];
+      continue;
+    }
     const tokens = line.replace(/\s+/g, " ").trim().split(" ");
     const starts = /^\d{1,3}$/.test(tokens[0] ?? "");
     const decimals = tokens.filter((t) => DECIMAL_RE.test(t));
@@ -87,7 +123,8 @@ export function parseInvoiceLines(lines: string[]): InvoiceLine[] {
       const rate = values.find((v) => qty > 0 && Math.abs(v * qty - amount) <= Math.max(1, amount * 0.001));
       const unitCost = rate ?? (qty > 0 ? amount / qty : amount);
 
-      last = { name, qty: qty || 1, unitCost: Math.round(unitCost * 100) / 100, amount, hsn };
+      const pct = percentValues(line);
+      last = { name, qty: qty || 1, unitCost: Math.round(unitCost * 100) / 100, amount, hsn, gstRate: pct[0], discountPct: pct[1] };
       rows.push(last);
     } else if (last && !decimals.length && /^[A-Za-z(]/.test(line.trim()) && tokens.length <= 8 && !/total|gst|tax|amount|bank|ifsc|round/i.test(line)) {
       // A wrapped continuation of the previous item's name.
@@ -98,6 +135,12 @@ export function parseInvoiceLines(lines: string[]): InvoiceLine[] {
 
   // Second pass for tables without a serial-number column: any line with a name and 2+ amounts.
   for (const line of lines) {
+    const imeis = rows.length ? extractImeis(line) : [];
+    if (imeis.length) {
+      const prev = rows[rows.length - 1];
+      prev.imeis = [...new Set([...(prev.imeis ?? []), ...imeis])];
+      continue;
+    }
     const tokens = line.replace(/\s+/g, " ").trim().split(" ");
     const decimals = tokens.filter((t) => DECIMAL_RE.test(t)).map(num);
     const firstNum = tokens.findIndex((t) => /^[\d,]+(\.\d+)?$/.test(t) && t.length >= 3);
@@ -107,10 +150,47 @@ export function parseInvoiceLines(lines: string[]): InvoiceLine[] {
       const unitIdx = tokens.findIndex((t) => UNIT_RE.test(t));
       const qty = unitIdx > 0 && /^\d+(\.\d+)?$/.test(tokens[unitIdx - 1]) ? num(tokens[unitIdx - 1]) : 1;
       const rate = decimals.find((v) => Math.abs(v * qty - amount) <= Math.max(1, amount * 0.001)) ?? amount / qty;
-      rows.push({ name, qty, unitCost: Math.round(rate * 100) / 100, amount });
+      const pct = percentValues(line);
+      rows.push({ name, qty, unitCost: Math.round(rate * 100) / 100, amount, gstRate: pct[0], discountPct: pct[1] });
     }
   }
   return rows;
+}
+
+const GSTIN_RE = /\b\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]\b/g;
+
+/** Best-effort guess of the invoice header from the printed text (used when the QR can't be read). */
+export function parseInvoiceHeader(lines: string[]): InvoiceHeaderGuess {
+  const out: InvoiceHeaderGuess = {};
+  const text = lines.join("\n");
+  const gstins = [...new Set(text.toUpperCase().match(GSTIN_RE) ?? [])];
+  out.sellerGstin = gstins[0];
+  out.buyerGstin = gstins[1];
+
+  // Seller name: the nearest "business-looking" line above the first GSTIN line.
+  const gIdx = lines.findIndex((l) => GSTIN_RE.test(l.toUpperCase()));
+  GSTIN_RE.lastIndex = 0;
+  const bizRe = /(corporation|traders?|enterprises?|agenc(?:y|ies)|distributors?|sales|communications?|pvt|ltd|limited|& co|company)/i;
+  for (let i = (gIdx < 0 ? lines.length : gIdx) - 1; i >= 0; i--) {
+    if (bizRe.test(lines[i]) && !/buyer|bill to|ship to|invoice/i.test(lines[i])) {
+      out.sellerName = lines[i].replace(/\s+/g, " ").trim();
+      break;
+    }
+  }
+
+  const inv = text.match(/\b[A-Z]{1,6}\/[A-Z0-9]{1,6}\/\d{2,6}(?:-\d{2,4})?\/\d{1,8}\b/);
+  if (inv) out.invoiceNumber = inv[0];
+  const date = text.match(/\b(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ](\d{2,4})\b/) ?? text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
+  if (date) out.invoiceDate = date[0];
+  const ewb = text.match(/\b\d{12}\b/);
+  if (ewb) out.eWayBill = ewb[0];
+
+  // Grand total: the amount after a rupee sign, else the biggest amount on a "Total" line.
+  const rupee = [...text.matchAll(/[₹Rr][sS]?\.?\s*(\d[\d,]*\.\d{2})/g)].map((m) => num(m[1]));
+  const totals = lines.filter((l) => /total/i.test(l)).flatMap((l) => l.split(/\s+/).filter((t) => DECIMAL_RE.test(t)).map(num));
+  const pool = rupee.length ? rupee : totals;
+  if (pool.length) out.totalValue = Math.max(...pool);
+  return out;
 }
 
 async function pdfToLines(file: File): Promise<string[]> {
