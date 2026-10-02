@@ -176,6 +176,8 @@ export function InvoiceImportModal({
             ...lines.map((l) =>
               newRow({
                 name: l.name,
+                // Phones carry IMEIs / HSN 8517; everything else stays "Accessories" until changed.
+                category: l.imeis?.length || /^8517/.test(l.hsn ?? "") ? "Smartphones" : "Accessories",
                 qty: l.qty,
                 unitCost: l.unitCost,
                 hsn: l.hsn ?? "",

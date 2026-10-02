@@ -88,7 +88,75 @@ function percentValues(line: string): number[] {
   return [...line.matchAll(/(\d+(?:\.\d+)?)\s*%/g)].map((m) => Number(m[1]));
 }
 
+/**
+ * "Bill" layout from billing apps: every item is a block — name on one line, then a line with
+ * "<#> <qty> ₹price ₹GST (18%) ₹amount" (serials / HSN may be mixed into it), then "Serial No.: …" lines.
+ * Amounts there INCLUDE GST; `unitCost` is the per-unit price before GST.
+ */
+function parseBillBlocks(lines: string[]): InvoiceLine[] {
+  const start = lines.findIndex((l) => /item\s*name/i.test(l) && /quantity|qty/i.test(l));
+  if (start < 0) return [];
+  const rows: InvoiceLine[] = [];
+  let block: string[] = [];
+
+  const flush = () => {
+    const cur = block;
+    block = [];
+    const numLine = cur.find((l) => l.includes("₹"));
+    if (!numLine) return;
+    const text = cur.join(" ");
+    const name = cur
+      .filter((l) => !l.includes("₹") && !/^serial/i.test(l) && !/^[\d,\s]+$/.test(l))
+      .join(" ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!name) return;
+    const imeis = [...new Set(text.match(/\b\d{15}\b/g) ?? [])];
+    const hsn = text.match(/\b\d{8}\b/)?.[0];
+    const amounts = [...numLine.matchAll(/₹\s*(\d[\d,]*(?:\.\d+)?)/g)].map((m) => num(m[1]));
+    if (!amounts.length) return;
+    const price = amounts[0];
+    const amount = amounts[amounts.length - 1];
+    const gstAmt = amounts.length >= 3 ? amounts[1] : undefined;
+    const rateText = numLine.match(/\((\d+(?:\.\d+)?)%\)/)?.[1];
+
+    // Quantity: the whole numbers before the first ₹ (the row number and the quantity) — pick the one
+    // that makes qty × price + GST equal the line amount.
+    const before = numLine
+      .slice(0, numLine.indexOf("₹"))
+      .replace(/serial\s*no\.?:?/gi, " ")
+      .replace(/\b\d{6,}\b/g, " ");
+    const ints = (before.match(/\b\d{1,4}\b/g) ?? []).map(Number);
+    let rate = rateText != null ? Number(rateText) : undefined;
+    const fits = (q: number, r: number) => Math.abs(q * price * (1 + r / 100) - amount) <= Math.max(1, amount * 0.002);
+    let qty = [...ints].reverse().find((q) => q > 0 && rate != null && fits(q, rate));
+    if (qty == null) qty = imeis.length || ints[ints.length - 1] || 1;
+    if (rate == null && gstAmt != null && price * qty > 0) rate = Math.round((gstAmt / (price * qty)) * 1000) / 10;
+
+    rows.push({ name, qty, unitCost: price, amount, hsn, gstRate: rate, imeis: imeis.length ? imeis : undefined });
+  };
+
+  for (const raw of lines.slice(start + 1)) {
+    const t = raw.trim();
+    if (/^total\b/i.test(t)) break;
+    const isName = /[a-z]/i.test(t) && !t.includes("₹") && !/^serial/i.test(t) && !/^[\d,\s]+$/.test(t);
+    // A new item begins once the previous block already has its price line.
+    if (isName && block.some((b) => b.includes("₹"))) flush();
+    block.push(t);
+  }
+  flush();
+
+  // Only some rows print the HSN; when the bill has just one HSN anywhere, it applies to all of them.
+  const hsns = new Set(lines.join(" ").match(/\b\d{8}\b/g) ?? []);
+  if (hsns.size === 1) for (const r of rows) r.hsn = r.hsn ?? [...hsns][0];
+  return rows;
+}
+
 export function parseInvoiceLines(lines: string[]): InvoiceLine[] {
+  if (lines.some((l) => l.includes("₹")) && lines.some((l) => /serial\s*no/i.test(l))) {
+    const bill = parseBillBlocks(lines);
+    if (bill.length) return bill;
+  }
   const rows: InvoiceLine[] = [];
   let last: InvoiceLine | null = null;
 
@@ -167,11 +235,21 @@ export function parseInvoiceHeader(lines: string[]): InvoiceHeaderGuess {
   out.sellerGstin = gstins[0];
   out.buyerGstin = gstins[1];
 
+  // "Bill From: <party>" layout: the letterhead (and its GSTIN) is the shop's own, the supplier is the
+  // party named under "Bill From".
+  const fromIdx = lines.findIndex((l) => /bill\s*from/i.test(l));
+  if (fromIdx >= 0) {
+    out.buyerGstin = gstins[0];
+    out.sellerGstin = gstins[1];
+    const clean = (l: string) => l.replace(/bill\s*from\s*:?/i, " ").replace(/bill\s*details\s*:?/i, " ").replace(/\b(?:bill|invoice)\s*(?:no|number)\b.*$/i, "").replace(/\s+/g, " ").trim();
+    out.sellerName = clean(lines[fromIdx]) || clean(lines[fromIdx + 1] ?? "") || undefined;
+  }
+
   // Seller name: the nearest "business-looking" line above the first GSTIN line.
   const gIdx = lines.findIndex((l) => GSTIN_RE.test(l.toUpperCase()));
   GSTIN_RE.lastIndex = 0;
   const bizRe = /(corporation|traders?|enterprises?|agenc(?:y|ies)|distributors?|sales|communications?|pvt|ltd|limited|& co|company)/i;
-  for (let i = (gIdx < 0 ? lines.length : gIdx) - 1; i >= 0; i--) {
+  for (let i = fromIdx >= 0 ? -1 : (gIdx < 0 ? lines.length : gIdx) - 1; i >= 0; i--) {
     if (bizRe.test(lines[i]) && !/buyer|bill to|ship to|invoice/i.test(lines[i])) {
       out.sellerName = lines[i].replace(/\s+/g, " ").trim();
       break;
@@ -180,6 +258,10 @@ export function parseInvoiceHeader(lines: string[]): InvoiceHeaderGuess {
 
   const inv = text.match(/\b[A-Z]{1,6}\/[A-Z0-9]{1,6}\/\d{2,6}(?:-\d{2,4})?\/\d{1,8}\b/);
   if (inv) out.invoiceNumber = inv[0];
+  else {
+    const labelled = text.match(/(?:bill|invoice)\s*(?:no|number|#)\.?\s*[:#-]?\s*([A-Za-z0-9][A-Za-z0-9/-]*)/i);
+    if (labelled) out.invoiceNumber = labelled[1];
+  }
   const date = text.match(/\b(\d{1,2})[-/ ]([A-Za-z]{3})[-/ ](\d{2,4})\b/) ?? text.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
   if (date) out.invoiceDate = date[0];
   const ewb = text.match(/\b\d{12}\b/);
@@ -188,7 +270,9 @@ export function parseInvoiceHeader(lines: string[]): InvoiceHeaderGuess {
   // Grand total: the amount after a rupee sign, else the biggest amount on a "Total" line.
   const rupee = [...text.matchAll(/[₹Rr][sS]?\.?\s*(\d[\d,]*\.\d{2})/g)].map((m) => num(m[1]));
   const totals = lines.filter((l) => /total/i.test(l)).flatMap((l) => l.split(/\s+/).filter((t) => DECIMAL_RE.test(t)).map(num));
-  const pool = rupee.length ? rupee : totals;
+  // A labelled "Total : ₹ x" (not "Sub Total") is the rounded payable amount — prefer it.
+  const labelledTotal = [...text.matchAll(/(?<!sub\s)total\s*:\s*₹\s*(\d[\d,]*\.\d{2})/gi)].map((m) => num(m[1]));
+  const pool = labelledTotal.length ? labelledTotal : rupee.length ? rupee : totals;
   if (pool.length) out.totalValue = Math.max(...pool);
   return out;
 }
@@ -263,16 +347,24 @@ export async function decodeQrFromImage(file: File): Promise<string | null> {
   const wasmUrl = (await import("zxing-wasm/reader/zxing_reader.wasm?url")).default;
   setZXingModuleOverrides({ locateFile: (path: string, prefix: string) => (path.endsWith(".wasm") ? wasmUrl : prefix + path) });
   const bmp = await createImageBitmap(file);
-  const tryScales = [1, 0.5];
+  // The phone's own detector (Google's engine on Android Chrome) copes with dense QRs far better — try it first.
+  try {
+    const Native = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => { detect: (s: ImageBitmap) => Promise<{ rawValue: string }[]> } }).BarcodeDetector;
+    const hit = Native ? (await new Native({ formats: ["qr_code"] }).detect(bmp))[0] : undefined;
+    if (hit?.rawValue) return hit.rawValue;
+  } catch {
+    /* not supported here — fall through to the WASM decoder */
+  }
+  const tryScales = [1, 0.75, 0.5];
   for (const sc of tryScales) {
-    const maxSide = 2600;
+    const maxSide = 3200;
     const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height)) * sc;
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(bmp.width * k));
     canvas.height = Math.max(1, Math.round(bmp.height * k));
     const ctx = canvas.getContext("2d")!;
     ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), { tryHarder: true, tryRotate: true, formats: ["QRCode"], maxNumberOfSymbols: 1 });
+    const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), { tryHarder: true, tryRotate: true, tryInvert: true, tryDownscale: sc < 1, formats: ["QRCode"], maxNumberOfSymbols: 1 });
     if (found.length && found[0].text) return found[0].text;
   }
   return null;

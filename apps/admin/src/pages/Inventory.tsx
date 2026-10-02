@@ -7,7 +7,8 @@ import { ExportExcelButton } from "../components/ExportExcelButton";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { BrandCombobox } from "../components/BrandCombobox";
 import { InvoiceImportModal } from "../components/InvoiceImportModal";
-import { decodeEInvoiceQr, type EInvoiceSummary } from "../lib/invoiceReader";
+import { decodeEInvoiceQr, decodeQrFromImage, type EInvoiceSummary } from "../lib/invoiceReader";
+import { startQrScan, type QrScanHandle } from "../lib/qrScanner";
 
 import { uploadProductImage } from "../lib/uploadImage";
 
@@ -415,7 +416,10 @@ export function Inventory() {
   // reads whatever a supplier's carton or invoice QR encodes and tries to
   // pre-fill Name + match an existing Brand, since suppliers rarely encode
   // a brand_id our DB would recognize directly.
-  const invoiceScannerRef = useRef<Html5Qrcode | null>(null);
+  const invoiceScannerRef = useRef<QrScanHandle | null>(null);
+  const invoicePhotoRef = useRef<HTMLInputElement | null>(null);
+  const [invoiceZoom, setInvoiceZoom] = useState<QrScanHandle["zoom"]>(undefined);
+  const [invoiceTorch, setInvoiceTorch] = useState<{ supported: boolean; on: boolean }>({ supported: false, on: false });
   const [invoiceScanActive, setInvoiceScanActive] = useState(false);
   const [invoiceScanFeedback, setInvoiceScanFeedback] = useState<string | null>(null);
 
@@ -1011,22 +1015,12 @@ export function Inventory() {
     try {
       setInvoiceScanActive(true);
       await waitForElement("invoice-scanner-region");
-      // Government e-invoice QRs are very dense: scan the whole frame at high resolution and use the
-      // phone's built-in barcode detector where available (the JS decoder alone often fails on them).
-      const scanner = new Html5Qrcode("invoice-scanner-region", { formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE], useBarCodeDetectorIfSupported: true, verbose: false });
-      invoiceScannerRef.current = scanner;
-      await scanner.start(
-        { facingMode: "environment" },
-        {
-          fps: 8,
-          qrbox: (w: number, h: number) => ({ width: Math.floor(Math.min(w, h) * 0.95), height: Math.floor(Math.min(w, h) * 0.95) }),
-          videoConstraints: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 }, focusMode: "continuous" } as MediaTrackConstraints,
-        },
-        (decoded) => onInvoiceScanDecoded(decoded),
-        () => {
-          /* per-frame errors are noise, don't surface */
-        }
-      );
+      // Government e-invoice QRs are very dense: read full-resolution frames with the phone's own barcode
+      // detector plus zxing-wasm (see lib/qrScanner.ts) instead of html5-qrcode's small cropped box.
+      const handle = await startQrScan(document.getElementById("invoice-scanner-region")!, (decoded) => onInvoiceScanDecoded(decoded));
+      invoiceScannerRef.current = handle;
+      setInvoiceZoom(handle.zoom);
+      setInvoiceTorch({ supported: handle.torchSupported, on: false });
     } catch (err: any) {
       setInvoiceScanActive(false);
       invoiceScannerRef.current = null;
@@ -1039,12 +1033,27 @@ export function Inventory() {
     if (!scanner) return;
     try {
       await scanner.stop();
-      scanner.clear();
     } catch {
       /* already stopped */
     }
     invoiceScannerRef.current = null;
     setInvoiceScanActive(false);
+    setInvoiceZoom(undefined);
+    setInvoiceTorch({ supported: false, on: false });
+  }
+
+  // Fallback that always works: the phone's own camera app takes a full-resolution, auto-focused photo.
+  async function onInvoicePhoto(file: File | undefined) {
+    if (!file) return;
+    setInvoiceScanFeedback("Reading the QR from the photo…");
+    try {
+      const text = await decodeQrFromImage(file);
+      if (text) await onInvoiceScanDecoded(text);
+      else setInvoiceScanFeedback("No QR could be read from that photo. Retake it closer, with the whole QR in frame, in focus and without glare — or upload the invoice PDF via the button below.");
+    } catch {
+      setInvoiceScanFeedback("Could not read that photo.");
+    }
+    if (invoicePhotoRef.current) invoicePhotoRef.current.value = "";
   }
 
   async function onInvoiceScanDecoded(text: string) {
@@ -1732,11 +1741,39 @@ export function Inventory() {
                 ) : (
                   <>
                     <div id="invoice-scanner-region" className="mx-auto w-full max-w-md overflow-hidden rounded-md bg-gray-100" />
+                    {invoiceZoom && (
+                      <label className="mt-2 flex items-center gap-2 text-[11px] text-gray-500">
+                        Zoom
+                        <input
+                          type="range"
+                          className="flex-1"
+                          min={invoiceZoom.min}
+                          max={invoiceZoom.max}
+                          step={invoiceZoom.step}
+                          defaultValue={invoiceZoom.value}
+                          onChange={(e) => invoiceScannerRef.current?.setZoom(Number(e.target.value)).catch(() => {})}
+                        />
+                      </label>
+                    )}
+                    {invoiceTorch.supported && (
+                      <button
+                        type="button"
+                        className="btn-secondary mt-2 w-full text-xs"
+                        onClick={() => invoiceScannerRef.current?.setTorch(!invoiceTorch.on).then(() => setInvoiceTorch((t) => ({ ...t, on: !t.on }))).catch(() => {})}
+                      >
+                        {invoiceTorch.on ? "Torch On" : "Torch Off"}
+                      </button>
+                    )}
+                    <p className="mt-1.5 text-center text-[11px] text-gray-400">Hold 15–25 cm away, keep the whole QR in view and steady, avoid glare — use Zoom if it is small.</p>
                     <button type="button" className="btn-ghost mt-2 w-full text-xs" onClick={stopInvoiceScanner}>
                       Stop Camera
                     </button>
                   </>
                 )}
+                <input ref={invoicePhotoRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => onInvoicePhoto(e.target.files?.[0])} />
+                <button type="button" className="btn-ghost mt-1.5 w-full text-xs" onClick={() => invoicePhotoRef.current?.click()}>
+                  <Camera size={13} /> Take a photo of the QR instead (sharper)
+                </button>
                 {!invoiceScanActive && (
                   <button type="button" className="btn-ghost mt-1.5 w-full text-xs" onClick={() => setInvoiceImport({ summary: null })}>
                     Add several items from an invoice (PDF / photo / by hand)
