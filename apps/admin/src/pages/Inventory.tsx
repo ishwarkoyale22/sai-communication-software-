@@ -4,11 +4,14 @@ import { formatCurrency, validateImei, normalizeImei, softDelete } from "@sai/sh
 import type { InventoryUnit } from "@sai/shared";
 import { supabase } from "../lib/supabase";
 import { ExportExcelButton } from "../components/ExportExcelButton";
-import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { BrandCombobox } from "../components/BrandCombobox";
 import { InvoiceImportModal } from "../components/InvoiceImportModal";
 import { decodeEInvoiceQr, decodeQrFromImage, type EInvoiceSummary } from "../lib/invoiceReader";
 import { startQrScan, type QrScanHandle } from "../lib/qrScanner";
+import { useLiveScanner } from "../lib/scanner/useLiveScanner";
+import { IMEI_FORMATS } from "../lib/scanner/types";
+import { checkImeiCandidate } from "../lib/scanner/imeiRules";
+import { decodeImageStaged, type PhotoCandidate } from "../lib/scanner/imageSource";
 
 import { uploadProductImage } from "../lib/uploadImage";
 
@@ -403,14 +406,48 @@ export function Inventory() {
       }
   >(null);
   const excelInputRef = useRef<HTMLInputElement>(null);
-  // Scan mode — live camera decode.
-  const scannerRef = useRef<Html5Qrcode | null>(null);
-  const lastScanRef = useRef<{ text: string; at: number } | null>(null);
-  const [torchSupported, setTorchSupported] = useState(false);
-  const [torchOn, setTorchOn] = useState(false);
-  const [scanActive, setScanActive] = useState(false);
+  // Scan mode — live camera decode via the shared scanner engine
+  // (apps/admin/src/lib/scanner): native BarcodeDetector + zxing-wasm,
+  // multi-frame verification (3 matching reads by default before a value is
+  // ever accepted — see verifier.ts), never a single-frame guess.
+  const imeiScanContainerRef = useRef<HTMLDivElement | null>(null);
+  const imeiPhotoInputRef = useRef<HTMLInputElement | null>(null);
   const [scanFeedback, setScanFeedback] = useState<string | null>(null);
   const [scannedPending, setScannedPending] = useState<{ imei_1: string; imei_2: string; serial_no: string }[]>([]);
+  // Dual-IMEI safety: when a second distinct IMEI is accepted within a few
+  // seconds of the first (and the first has no imei_2 yet), ask explicitly
+  // whether they're one dual-SIM phone instead of ever assuming it — see
+  // acceptScannedImei() below. Default (no answer) is "two separate units",
+  // i.e. the same behavior as before this existed.
+  const lastAcceptedImeiRef = useRef<{ imei: string; at: number } | null>(null);
+  const [dualImeiPrompt, setDualImeiPrompt] = useState<{ prevImei: string; newImei: string } | null>(null);
+  // Photo (still-image) IMEI scanning — staged decode with multiple
+  // preprocessing passes; see lib/scanner/imageSource.ts. Candidates with
+  // agreement >= 2 are "likely correct" (confirmed by 2+ independent
+  // passes/engines), never claimed certain — the user always confirms.
+  const [photoCandidates, setPhotoCandidates] = useState<PhotoCandidate[] | null>(null);
+  const [photoScanBusy, setPhotoScanBusy] = useState(false);
+
+  const imeiScanner = useLiveScanner({
+    formats: IMEI_FORMATS,
+    verifier: { requiredMatches: 3, windowMs: 4000 },
+    onAccepted: (text) => {
+      try {
+        navigator.vibrate?.(60);
+      } catch {
+        /* vibration unsupported */
+      }
+      const check = checkImeiCandidate(text);
+      if (!check.ok) {
+        setScanFeedback(check.message);
+        return;
+      }
+      void acceptScannedImei(check.imei);
+    },
+    onConflict: () => {
+      setScanFeedback("Different values were read — hold the barcode steady and directly facing the camera, then try again.");
+    },
+  });
 
   // Product/Invoice QR scan (distinct from the IMEI/serial scanner above) —
   // reads whatever a supplier's carton or invoice QR encodes and tries to
@@ -632,39 +669,21 @@ export function Inventory() {
         if (toggleErr) throw toggleErr;
       }
 
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const userId = session?.user?.id ?? null;
-
-      // Insert unit rows with client-generated ids so we can immediately
-      // write matching imei_history 'purchase' + 'in_stock' events without
-      // a second round-trip to look up the ids.
-      const toInsert = rows.map((r) => ({
-        id: crypto.randomUUID(),
-        inventory_id: serialsModalFor.id,
-        imei_1: normalizeImei(r.imei_1) || null,
-        imei_2: normalizeImei(r.imei_2) || null,
-        serial_no: r.serial_no.trim() || null,
-        status: "in_stock" as const,
-        created_by: userId,
-        updated_by: userId,
-      }));
-
-      const { error: unitsErr } = await supabase.from("inventory_units").insert(toInsert);
-      if (unitsErr) throw unitsErr;
-
-      // History: one 'purchase' event per unit, matching spec §8 lifecycle.
-      const historyRows = toInsert.map((u) => ({
-        stock_unit_id: u.id,
-        imei_1: u.imei_1,
-        imei_2: u.imei_2,
-        event_type: "purchase" as const,
-        to_status: "in_stock",
-        created_by: userId,
-      }));
-      const { error: histErr } = await supabase.from("imei_history").insert(historyRows);
-      if (histErr) throw histErr;
+      // Atomic save: inventory_units + imei_history are inserted together,
+      // inside one database transaction (see
+      // supabase/migrations/0065_imei_db_safety.sql's
+      // add_inventory_units_with_history RPC). If any unit in the batch
+      // fails — duplicate IMEI, invalid IMEI, anything — the WHOLE batch
+      // rolls back; a unit can never end up saved with no history event.
+      const { error: rpcErr } = await supabase.rpc("add_inventory_units_with_history", {
+        p_inventory_id: serialsModalFor.id,
+        p_units: rows.map((r) => ({
+          imei_1: normalizeImei(r.imei_1) || null,
+          imei_2: normalizeImei(r.imei_2) || null,
+          serial_no: r.serial_no.trim() || null,
+        })),
+      });
+      if (rpcErr) throw rpcErr;
 
       // Reset the draft for the next batch.
       setManualRows([{ imei_1: "", imei_2: "", serial_no: "" }]);
@@ -735,152 +754,258 @@ export function Inventory() {
     await commitDraftRows(clean.map((r) => ({ imei_1: r.imei_1, imei_2: r.imei_2, serial_no: r.serial_no })));
   }
 
-  // ── Camera Scan (Method A) ─────────────────────────────────────────────
+  // ── Camera Scan (Method A) — shared scanner engine ─────────────────────
+  // Starts the live camera and the multi-frame verification loop (see
+  // lib/scanner/useLiveScanner.ts). A value only ever reaches
+  // acceptScannedImei() below after 3 matching reads agree — see
+  // verifier.ts. Format/Luhn validation happens in the hook's onAccepted
+  // callback (checkImeiCandidate), configured above where imeiScanner is
+  // created.
   async function startScanner() {
-    if (scanActive) return;
+    if (imeiScanner.state.active) return;
     setScanFeedback(null);
     setSerialsModalError(null);
-    try {
-      setScanActive(true);
-      await waitForElement("imei-scanner-region");
-      const scanner = new Html5Qrcode("imei-scanner-region", {
-        formatsToSupport: [
-          Html5QrcodeSupportedFormats.CODE_128,
-          Html5QrcodeSupportedFormats.CODE_39,
-          Html5QrcodeSupportedFormats.EAN_13,
-          Html5QrcodeSupportedFormats.EAN_8,
-          Html5QrcodeSupportedFormats.UPC_A,
-          Html5QrcodeSupportedFormats.UPC_E,
-          Html5QrcodeSupportedFormats.ITF,
-          Html5QrcodeSupportedFormats.QR_CODE,
-        ],
-        useBarCodeDetectorIfSupported: true,
-        verbose: false,
-      });
-      scannerRef.current = scanner;
-      lastScanRef.current = null;
-      await scanner.start(
-        { facingMode: "environment" },
-        {
-          fps: 15,
-          // Wide and short so 1D barcodes (IMEI on a phone box) aren't cropped by a square box.
-          qrbox: (w: number, h: number) => ({
-            width: Math.floor(w * 0.9),
-            height: Math.floor(Math.min(h * 0.5, w * 0.4)),
-          }),
-          videoConstraints: {
-            facingMode: "environment",
-            width: { ideal: 1920 },
-            height: { ideal: 1080 },
-            advanced: [{ focusMode: "continuous" } as any],
-          },
-        },
-        (decoded) => {
-          // Same barcode is re-decoded on every frame while it stays in view; ignore repeats for 2.5s.
-          const now = Date.now();
-          const last = lastScanRef.current;
-          if (last && last.text === decoded && now - last.at < 2500) return;
-          lastScanRef.current = { text: decoded, at: now };
-          try {
-            navigator.vibrate?.(60);
-          } catch {
-            /* vibration unsupported */
-          }
-          onScanDecoded(decoded);
-        },
-        () => {
-          /* per-frame errors are noise, don't surface */
-        }
-      );
-      try {
-        setTorchSupported(!!(scanner.getRunningTrackCapabilities() as any)?.torch);
-      } catch {
-        setTorchSupported(false);
-      }
-    } catch (err: any) {
-      setScanActive(false);
-      scannerRef.current = null;
-      const message = cameraErrorMessage(err);
-      // scanFeedback renders in both the Add-Product form's scan section and
-      // the Manage Serials modal's, so the failure is visible regardless of
-      // which one is open; serialsModalError additionally surfaces it in the
-      // Manage Serials modal's own error banner.
-      setScanFeedback(message);
-      setSerialsModalError(message);
+    await new Promise((r) => requestAnimationFrame(r)); // let the container <div> render first
+    const container = imeiScanContainerRef.current;
+    if (!container) {
+      setScanFeedback("Could not start the camera — the scanner area did not render.");
+      return;
+    }
+    await imeiScanner.start(container);
+    if (imeiScanner.state.feedback) {
+      setScanFeedback(imeiScanner.state.feedback);
+      setSerialsModalError(imeiScanner.state.feedback);
     }
   }
 
   async function stopScanner() {
-    const scanner = scannerRef.current;
-    if (!scanner) return;
-    try {
-      await scanner.stop();
-      scanner.clear();
-    } catch {
-      /* already stopped */
-    }
-    scannerRef.current = null;
-    setScanActive(false);
-    setTorchOn(false);
-    setTorchSupported(false);
+    imeiScanner.stop();
   }
 
-  async function toggleTorch() {
-    const scanner = scannerRef.current;
-    if (!scanner) return;
-    try {
-      await scanner.applyVideoConstraints({ advanced: [{ torch: !torchOn } as any] });
-      setTorchOn(!torchOn);
-    } catch {
-      setTorchSupported(false);
-    }
-  }
-
-  async function onScanDecoded(text: string) {
-    const normalized = normalizeImei(text);
-    const res = validateImei(normalized);
-    if (!res.ok) {
-      setScanFeedback(res.message ?? "Invalid scan");
-      return;
-    }
-
+  // Called only after a value has passed BOTH 3-matching-read verification
+  // (the live loop) and format+Luhn validation (checkImeiCandidate) — see
+  // the onAccepted callback above. From here it still goes through the same
+  // in-batch and database duplicate checks as before.
+  async function acceptScannedImei(imei: string) {
     // Add New Product form: scanning here builds up the plain "one per
     // line" serials textarea directly, so a brand-new serialized product
     // (e.g. a fresh wholesaler carton) can be created and stocked in one
     // pass instead of adding it first and scanning separately afterwards.
+    // insertProduct() (below) now re-validates and routes every 15-digit
+    // entry here through the same Luhn + atomic-save path as Manage
+    // Serials — scanning into this form can no longer bypass that.
     if (showAddForm) {
       const existing = parseSerials(form.serials);
-      if (existing.includes(res.normalized)) {
-        setScanFeedback(`Already scanned in this batch: ${res.normalized}`);
+      if (existing.includes(imei)) {
+        setScanFeedback(`Already scanned in this batch: ${imei}`);
         return;
       }
-      const owner = await findExistingImeiOwner(res.normalized);
+      const owner = await findExistingImeiOwner(imei);
       if (owner) {
-        setScanFeedback(`IMEI ${res.normalized} already exists.`);
+        setScanFeedback(`IMEI ${imei} already exists.`);
         return;
       }
-      setForm((prev) => ({ ...prev, serials: [...parseSerials(prev.serials), res.normalized].join("\n") }));
-      setScanFeedback(`Added ${res.normalized}`);
+      setForm((prev) => ({ ...prev, serials: [...parseSerials(prev.serials), imei].join("\n") }));
+      setScanFeedback(`Verified and added ${imei} (3 matching reads).`);
+      lastAcceptedImeiRef.current = { imei, at: Date.now() };
       return;
     }
 
     // Manage Serials modal (existing product): reject if already in the
     // pending list or existing stock.
-    if (scannedPending.some((r) => r.imei_1 === res.normalized || r.imei_2 === res.normalized)) {
-      setScanFeedback(`Already scanned in this batch: ${res.normalized}`);
+    if (scannedPending.some((r) => r.imei_1 === imei || r.imei_2 === imei)) {
+      setScanFeedback(`Already scanned in this batch: ${imei}`);
       return;
     }
-    const owner = await findExistingImeiOwner(res.normalized);
+    const owner = await findExistingImeiOwner(imei);
     if (owner) {
-      setScanFeedback(`IMEI ${res.normalized} already exists.`);
+      setScanFeedback(`IMEI ${imei} already exists.`);
       return;
     }
-    setScannedPending((prev) => [...prev, { imei_1: res.normalized, imei_2: "", serial_no: "" }]);
-    setScanFeedback(`Added ${res.normalized}`);
+
+    // Dual-IMEI safety: never silently decide two IMEIs scanned close
+    // together are the same dual-SIM phone. Default is "two separate
+    // units" (append as its own row, same as before) — a prompt offers
+    // merging them only when the previous row is still imei_2-empty and
+    // was accepted within the last 6 seconds.
+    const last = lastAcceptedImeiRef.current;
+    const prevRow = scannedPending[scannedPending.length - 1];
+    if (last && prevRow && !prevRow.imei_2 && prevRow.imei_1 === last.imei && Date.now() - last.at < 6000) {
+      setDualImeiPrompt({ prevImei: last.imei, newImei: imei });
+      lastAcceptedImeiRef.current = { imei, at: Date.now() };
+      return;
+    }
+
+    setScannedPending((prev) => [...prev, { imei_1: imei, imei_2: "", serial_no: "" }]);
+    setScanFeedback(`Verified and added ${imei} (3 matching reads).`);
+    lastAcceptedImeiRef.current = { imei, at: Date.now() };
+  }
+
+  function resolveDualImeiPrompt(mergeAsOneDevice: boolean) {
+    if (!dualImeiPrompt) return;
+    const { newImei } = dualImeiPrompt;
+    setScannedPending((prev) => {
+      if (mergeAsOneDevice) {
+        const idx = prev.length - 1;
+        if (idx < 0) return prev;
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], imei_2: newImei };
+        return copy;
+      }
+      return [...prev, { imei_1: newImei, imei_2: "", serial_no: "" }];
+    });
+    setDualImeiPrompt(null);
   }
 
   async function commitScannedRows() {
     await commitDraftRows(scannedPending);
+  }
+
+  // ── Photo IMEI Scan ──────────────────────────────────────────────────────
+  // Staged decode (lib/scanner/imageSource.ts): normal scale, alt scale,
+  // grayscale/contrast, sharpen, invert — stops as soon as 2 independent
+  // passes/engines agree on a value. Never auto-saves: every candidate is
+  // shown for explicit confirmation, and conflicting candidates are all
+  // shown rather than one being guessed.
+  async function onImeiPhotoFile(file: File | undefined) {
+    if (!file) return;
+    setScanFeedback(null);
+    setPhotoScanBusy(true);
+    try {
+      const { candidates } = await decodeImageStaged(file, IMEI_FORMATS);
+      const valid = candidates.filter((c) => checkImeiCandidate(c.text).ok);
+      if (valid.length === 0) {
+        setScanFeedback(
+          candidates.length
+            ? "A barcode was found but it is not a valid IMEI (wrong length or check digit) — retake the photo closer and in focus."
+            : "No barcode could be read from that photo. Try a closer, sharper, well-lit photo."
+        );
+      } else {
+        setPhotoCandidates(valid);
+      }
+    } catch {
+      setScanFeedback("Could not read that photo.");
+    } finally {
+      setPhotoScanBusy(false);
+      if (imeiPhotoInputRef.current) imeiPhotoInputRef.current.value = "";
+    }
+  }
+
+  async function confirmPhotoCandidate(imei: string) {
+    setPhotoCandidates(null);
+    const check = checkImeiCandidate(imei);
+    if (!check.ok) {
+      setScanFeedback(check.message);
+      return;
+    }
+    await acceptScannedImei(check.imei);
+  }
+
+  // Shared render for the IMEI camera/photo scanner — used identically by
+  // the Add Product form and the Manage Serials modal, so this is one
+  // function instead of two copies of the same ~30 lines of JSX.
+  function renderImeiScannerPanel() {
+    const { active, feedback, torchSupported, torchOn, zoom, pendingText, pendingProgress } = imeiScanner.state;
+    return (
+      <div>
+        {!active ? (
+          <div className="flex gap-2">
+            <button type="button" className="btn-secondary flex-1 text-xs" onClick={startScanner}>
+              <Camera size={13} /> Scan IMEI with Camera
+            </button>
+            <button type="button" className="btn-ghost text-xs" disabled={photoScanBusy} onClick={() => imeiPhotoInputRef.current?.click()}>
+              {photoScanBusy ? "Reading…" : "Photo"}
+            </button>
+            <input
+              ref={imeiPhotoInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => onImeiPhotoFile(e.target.files?.[0])}
+            />
+          </div>
+        ) : (
+          <>
+            <div ref={imeiScanContainerRef} className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
+            {pendingText && pendingProgress && (
+              <p className="mt-1.5 text-center text-xs text-brand-primary">
+                Reading {pendingText.slice(0, 6)}… ({pendingProgress.matches}/{pendingProgress.required} matching reads)
+              </p>
+            )}
+            {zoom && (
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-gray-500">
+                Zoom
+                <input
+                  type="range"
+                  className="flex-1"
+                  min={zoom.min}
+                  max={zoom.max}
+                  step={zoom.step}
+                  value={zoom.value}
+                  onChange={(e) => imeiScanner.setZoom(Number(e.target.value))}
+                />
+              </label>
+            )}
+            {torchSupported && (
+              <button type="button" className="btn-secondary mt-2 w-full text-xs" onClick={imeiScanner.toggleTorch}>
+                {torchOn ? "Torch On" : "Torch Off"}
+              </button>
+            )}
+            <button type="button" className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
+              Stop Camera
+            </button>
+          </>
+        )}
+        {feedback && <p className="mt-1.5 text-center text-xs text-gray-600">{feedback}</p>}
+        {scanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{scanFeedback}</p>}
+
+        {dualImeiPrompt && (
+          <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 p-2.5 text-xs">
+            <p className="mb-1.5 font-medium text-amber-800">
+              Two IMEIs scanned close together — is this ONE dual-SIM phone, or two separate phones?
+            </p>
+            <p className="mb-2 font-mono text-[11px] text-gray-600">
+              {dualImeiPrompt.prevImei} / {dualImeiPrompt.newImei}
+            </p>
+            <div className="flex gap-2">
+              <button type="button" className="btn-secondary flex-1 text-xs" onClick={() => resolveDualImeiPrompt(true)}>
+                Same phone (pair as IMEI 1 + 2)
+              </button>
+              <button type="button" className="btn-ghost flex-1 text-xs" onClick={() => resolveDualImeiPrompt(false)}>
+                Two separate phones
+              </button>
+            </div>
+          </div>
+        )}
+
+        {photoCandidates && (
+          <div className="mt-2 rounded-md border border-border bg-white p-2.5 text-xs">
+            <p className="mb-1.5 font-medium text-gray-700">
+              {photoCandidates.length === 1
+                ? "One IMEI found — confirmed by matching independent reads, but a photo scan is never certain. Check it against the box before confirming."
+                : `${photoCandidates.length} different valid IMEIs were read from this photo — they were not all read the same way, so nothing was picked automatically. Choose the correct one, or retake the photo.`}
+            </p>
+            <div className="space-y-1">
+              {photoCandidates.map((c) => (
+                <button
+                  key={c.text}
+                  type="button"
+                  className="flex w-full items-center justify-between rounded border border-border px-2 py-1 font-mono hover:bg-accent"
+                  onClick={() => confirmPhotoCandidate(c.text)}
+                >
+                  <span>{c.text}</span>
+                  <span className="text-[10px] text-gray-400">{c.agreement}x agreement</span>
+                </button>
+              ))}
+            </div>
+            <button type="button" className="btn-ghost mt-1.5 w-full text-[11px]" onClick={() => setPhotoCandidates(null)}>
+              None of these — cancel
+            </button>
+          </div>
+        )}
+      </div>
+    );
   }
 
   // ── Product / Invoice QR Scan ───────────────────────────────────────────
@@ -1178,6 +1303,29 @@ export function Inventory() {
     const brandId = await ensureBrand(f.brand_name, f.brand_id, brandCache);
     const serials = f.is_serialized ? parseSerials(f.serials) : [];
 
+    // Split into IMEI-shaped entries (15 digits) vs plain serial numbers.
+    // Every IMEI-shaped entry — whether typed by hand or scanned — gets the
+    // SAME strong validation as Manage Serials (format + Luhn + duplicate
+    // check) BEFORE anything is saved, closing the bypass where a scanned
+    // IMEI previously landed in serial_no with none of those checks.
+    const imeiEntries: string[] = [];
+    const plainSerials: string[] = [];
+    for (const s of serials) {
+      if (/^\d{15}$/.test(normalizeImei(s))) imeiEntries.push(normalizeImei(s));
+      else plainSerials.push(s);
+    }
+    if (imeiEntries.length) {
+      const seen = new Set<string>();
+      for (const imei of imeiEntries) {
+        const res = validateImei(imei);
+        if (!res.ok) throw new Error(`"${imei}": ${res.message}`);
+        if (seen.has(imei)) throw new Error(`IMEI ${imei} is listed twice.`);
+        seen.add(imei);
+        const owner = await findExistingImeiOwner(imei);
+        if (owner) throw new Error(`IMEI ${imei} already exists.`);
+      }
+    }
+
     const { data: inserted, error: insertErr } = await supabase
       .from("inventory")
       .insert({
@@ -1210,10 +1358,18 @@ export function Inventory() {
 
     if (insertErr) throw insertErr;
 
-    if (serials.length > 0) {
-      const { error: unitsErr } = await supabase.from("inventory_units").insert(
-        serials.map((serial_no) => ({ inventory_id: inserted.id, serial_no }))
-      );
+    // Atomic save (see supabase/migrations/0065_imei_db_safety.sql) — IMEI
+    // and plain-serial units together in one all-or-nothing database call,
+    // with a real imei_history 'purchase' event per unit, the same
+    // guarantee Manage Serials already had.
+    if (imeiEntries.length || plainSerials.length) {
+      const { error: unitsErr } = await supabase.rpc("add_inventory_units_with_history", {
+        p_inventory_id: inserted.id,
+        p_units: [
+          ...imeiEntries.map((imei) => ({ imei_1: imei })),
+          ...plainSerials.map((serial_no) => ({ serial_no })),
+        ],
+      });
       if (unitsErr) throw unitsErr;
     }
 
@@ -2151,26 +2307,7 @@ export function Inventory() {
                         value={form.serials}
                         onChange={(e) => setForm({ ...form, serials: e.target.value })}
                       />
-                      <div className="mt-2">
-                        {!scanActive ? (
-                          <button type="button" className="btn-secondary w-full text-xs" onClick={startScanner}>
-                            <Camera size={13} /> Scan IMEI / Serial with Camera
-                          </button>
-                        ) : (
-                          <>
-                            <div id="imei-scanner-region" className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
-                            {torchSupported && (
-                              <button type="button" className="btn-secondary mt-2 w-full text-xs" onClick={toggleTorch}>
-                                {torchOn ? "Torch On" : "Torch Off"}
-                              </button>
-                            )}
-                            <button type="button" className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
-                              Stop Camera
-                            </button>
-                          </>
-                        )}
-                        {scanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{scanFeedback}</p>}
-                      </div>
+                      <div className="mt-2">{renderImeiScannerPanel()}</div>
                     </Field>
                   ) : (
                     <QuantityStepper
@@ -2507,29 +2644,12 @@ export function Inventory() {
                   IMEI Added: {scannedPending.length}
                   {expectedQty !== "" ? ` / ${expectedQty}` : ""}
                 </div>
-                <div id="imei-scanner-region" className="mx-auto w-full max-w-xs overflow-hidden rounded-md bg-gray-100" />
-                {!scanActive ? (
-                  <button className="btn-secondary mt-2 w-full text-xs" onClick={startScanner}>
-                    <Camera size={13} /> Start Camera
-                  </button>
-                ) : (
-                  <>
-                    {torchSupported && (
-                      <button className="btn-secondary mt-2 w-full text-xs" onClick={toggleTorch}>
-                        {torchOn ? "Torch On" : "Torch Off"}
-                      </button>
-                    )}
-                    <button className="btn-ghost mt-2 w-full text-xs" onClick={stopScanner}>
-                      Stop Camera
-                    </button>
-                  </>
-                )}
-                {scanFeedback && <p className="mt-1.5 text-center text-xs text-gray-600">{scanFeedback}</p>}
+                {renderImeiScannerPanel()}
                 {scannedPending.length > 0 && (
                   <div className="mt-2 max-h-32 space-y-1 overflow-y-auto">
                     {scannedPending.map((r, i) => (
                       <div key={i} className="flex items-center justify-between rounded border border-gray-200 px-2 py-1 text-xs">
-                        <span className="font-mono">{r.imei_1}</span>
+                        <span className="font-mono">{r.imei_1}{r.imei_2 ? ` + ${r.imei_2}` : ""}</span>
                         <button onClick={() => setScannedPending(scannedPending.filter((_, j) => j !== i))} className="text-brand-danger">
                           <Trash2 size={12} />
                         </button>

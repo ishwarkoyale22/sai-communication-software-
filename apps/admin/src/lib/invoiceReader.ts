@@ -342,19 +342,13 @@ export async function readInvoiceFile(
 }
 
 /** Finds and decodes a QR code inside a photo (dense government e-invoice QRs included). */
+// Detection itself now runs through lib/scanner/engines.ts (native-then-zxing, the same engines
+// the IMEI scanner and the live invoice QR scanner use) instead of its own separate copy of that
+// logic. The multi-scale retry loop below is unchanged — a dense government e-invoice QR often
+// only decodes at a specific scale, so trying several is still worthwhile for a static photo.
 export async function decodeQrFromImage(file: File): Promise<string | null> {
-  const { readBarcodes, setZXingModuleOverrides } = await import("zxing-wasm/reader");
-  const wasmUrl = (await import("zxing-wasm/reader/zxing_reader.wasm?url")).default;
-  setZXingModuleOverrides({ locateFile: (path: string, prefix: string) => (path.endsWith(".wasm") ? wasmUrl : prefix + path) });
+  const { detectStaged } = await import("./scanner/engines");
   const bmp = await createImageBitmap(file);
-  // The phone's own detector (Google's engine on Android Chrome) copes with dense QRs far better — try it first.
-  try {
-    const Native = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => { detect: (s: ImageBitmap) => Promise<{ rawValue: string }[]> } }).BarcodeDetector;
-    const hit = Native ? (await new Native({ formats: ["qr_code"] }).detect(bmp))[0] : undefined;
-    if (hit?.rawValue) return hit.rawValue;
-  } catch {
-    /* not supported here — fall through to the WASM decoder */
-  }
   const tryScales = [1, 0.75, 0.5];
   for (const sc of tryScales) {
     const maxSide = 3200;
@@ -364,8 +358,8 @@ export async function decodeQrFromImage(file: File): Promise<string | null> {
     canvas.height = Math.max(1, Math.round(bmp.height * k));
     const ctx = canvas.getContext("2d")!;
     ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), { tryHarder: true, tryRotate: true, tryInvert: true, tryDownscale: sc < 1, formats: ["QRCode"], maxNumberOfSymbols: 1 });
-    if (found.length && found[0].text) return found[0].text;
+    const found = await detectStaged(ctx.getImageData(0, 0, canvas.width, canvas.height), ["qr_code"]);
+    if (found[0]?.text) return found[0].text;
   }
   return null;
 }

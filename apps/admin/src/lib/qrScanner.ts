@@ -2,6 +2,12 @@
 // and runs at low resolution, which is why such QRs never decode. This instead asks the camera for its
 // highest resolution with continuous focus, then tries the phone's own barcode detector (the same
 // Google engine Google Pay / PhonePe use on Android Chrome) and the zxing-wasm decoder on the FULL frame.
+//
+// Detection itself now runs through lib/scanner/engines.ts — the same native-then-zxing engines the
+// IMEI scanner uses — instead of its own separate copy of that logic. Everything else here (the public
+// API, first-decode-wins behavior, full-frame reads, zoom/torch) is unchanged from before this move, per
+// the requirement to preserve existing invoice-scanning functionality exactly.
+import { detectStaged } from "./scanner/engines";
 
 export interface QrScanHandle {
   stop: () => Promise<void>;
@@ -10,15 +16,6 @@ export interface QrScanHandle {
   setZoom: (v: number) => Promise<void>;
   torchSupported: boolean;
   setTorch: (on: boolean) => Promise<void>;
-}
-
-type Detector = { detect: (src: CanvasImageSource) => Promise<{ rawValue: string }[]> };
-
-async function loadZxing() {
-  const { readBarcodes, setZXingModuleOverrides } = await import("zxing-wasm/reader");
-  const wasmUrl = (await import("zxing-wasm/reader/zxing_reader.wasm?url")).default;
-  setZXingModuleOverrides({ locateFile: (path: string, prefix: string) => (path.endsWith(".wasm") ? wasmUrl : prefix + path) });
-  return readBarcodes;
 }
 
 export async function startQrScan(container: HTMLElement, onDecoded: (text: string) => void): Promise<QrScanHandle> {
@@ -44,17 +41,7 @@ export async function startQrScan(container: HTMLElement, onDecoded: (text: stri
   const caps = (track.getCapabilities?.() ?? {}) as MediaTrackCapabilities & { zoom?: { min: number; max: number; step?: number }; torch?: boolean };
   const apply = (c: Record<string, unknown>) => track.applyConstraints({ advanced: [c as MediaTrackConstraintSet] });
 
-  const NativeDetector = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => Detector }).BarcodeDetector;
-  let native: Detector | null = null;
-  try {
-    native = NativeDetector ? new NativeDetector({ formats: ["qr_code"] }) : null;
-  } catch {
-    native = null;
-  }
-  const readBarcodes = await loadZxing();
-
   let stopped = false;
-  let tick = 0;
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
 
@@ -63,26 +50,15 @@ export async function startQrScan(container: HTMLElement, onDecoded: (text: stri
       await new Promise((r) => setTimeout(r, 120));
       if (stopped || video.readyState < 2 || !video.videoWidth) continue;
       try {
-        if (native) {
-          const hit = (await native.detect(video))[0];
-          if (hit?.rawValue) return onDecoded(hit.rawValue);
-        }
-        // Every other pass, also run the WASM decoder on the full frame (capped so it stays quick).
-        if (tick++ % 2 === 0) {
-          const k = Math.min(1, 2400 / Math.max(video.videoWidth, video.videoHeight));
-          canvas.width = Math.round(video.videoWidth * k);
-          canvas.height = Math.round(video.videoHeight * k);
-          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-          const found = await readBarcodes(ctx.getImageData(0, 0, canvas.width, canvas.height), {
-            tryHarder: true,
-            tryRotate: true,
-            tryInvert: true,
-            tryDownscale: tick % 4 === 0, // downscaling helps with screen moiré, so alternate it
-            formats: ["QRCode"],
-            maxNumberOfSymbols: 1,
-          });
-          if (found[0]?.text) return onDecoded(found[0].text);
-        }
+        const k = Math.min(1, 2400 / Math.max(video.videoWidth, video.videoHeight));
+        canvas.width = Math.round(video.videoWidth * k);
+        canvas.height = Math.round(video.videoHeight * k);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Same staged strategy as before: native detector first (fast path), zxing-wasm only if
+        // native found nothing or isn't available (e.g. iPhone Safari) — see engines.ts.
+        const hits = await detectStaged(imageData, ["qr_code"]);
+        if (hits[0]?.text) return onDecoded(hits[0].text);
       } catch {
         /* a bad frame — keep scanning */
       }
