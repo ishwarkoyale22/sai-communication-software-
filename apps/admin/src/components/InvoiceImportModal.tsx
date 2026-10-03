@@ -32,6 +32,13 @@ interface Row {
 let rowKey = 1;
 const newRow = (p: Partial<Row> = {}): Row => ({ key: rowKey++, name: "", category: "Accessories", qty: 1, unitCost: 0, salePrice: 0, hsn: "", gstRate: "", imeiText: "", status: "pending", ...p });
 
+/** Per-row money: taxable = qty × cost, GST on top, total = both (matches the bill's Amount column). */
+function rowTotals(r: Pick<Row, "qty" | "unitCost" | "gstRate">) {
+  const taxable = Math.round(r.qty * r.unitCost * 100) / 100;
+  const gst = Math.round(taxable * (Number(r.gstRate) || 0)) / 100;
+  return { taxable, gst, total: Math.round((taxable + gst) * 100) / 100 };
+}
+
 const imeiList = (text: string) => text.split(/[\n,;]+/).map((t) => t.trim()).filter(Boolean);
 
 type ImeiState = { raw: string; imei: string; ok: boolean; problem?: string };
@@ -378,6 +385,18 @@ export function InvoiceImportModal({
                 <span className="self-end pb-2">Items on invoice: <b>{summary.itemCount ?? "—"}</b>{summary.mainHsn ? <> · Main HSN: <b>{summary.mainHsn}</b></> : null}</span>
               </div>
               {(() => {
+                const filled = rows.filter((r) => r.name.trim());
+                if (!filled.length) return null;
+                const sum = filled.reduce((a, r) => { const t = rowTotals(r); return { taxable: a.taxable + t.taxable, gst: a.gst + t.gst, total: a.total + t.total }; }, { taxable: 0, gst: 0, total: 0 });
+                return (
+                  <div className="mt-2 grid grid-cols-3 gap-2 rounded-md bg-white/70 p-2 text-[11px] text-gray-500">
+                    <span>Taxable value<br /><b className="text-xs text-gray-800">{formatCurrency(sum.taxable)}</b></span>
+                    <span>Total GST<br /><b className="text-xs text-gray-800">{formatCurrency(sum.gst)}</b></span>
+                    <span>Total with GST<br /><b className="text-xs text-gray-800">{formatCurrency(sum.total)}</b></span>
+                  </div>
+                );
+              })()}
+              {(() => {
                 const warnings: string[] = [];
                 const filled = rows.filter((r) => r.name.trim());
                 if (summary.itemCount && filled.length && filled.length !== summary.itemCount) warnings.push(`The invoice lists ${summary.itemCount} items but ${filled.length} are filled in below.`);
@@ -452,6 +471,16 @@ export function InvoiceImportModal({
                     <input type="number" min={0} className="input w-full" value={r.gstRate} disabled={locked} onChange={(e) => patch(r.key, { gstRate: e.target.value })} />
                   </label>
                 </div>
+                {(() => {
+                  const t = rowTotals(r);
+                  return (
+                    <div className="mt-2 grid grid-cols-3 gap-2 rounded-md bg-accent/40 p-2 text-[11px] text-gray-500">
+                      <span>Taxable<br /><b className="text-xs text-gray-800">{formatCurrency(t.taxable)}</b></span>
+                      <span>GST {r.gstRate !== "" ? `${r.gstRate}%` : ""}<br /><b className="text-xs text-gray-800">{formatCurrency(t.gst)}</b></span>
+                      <span>Total<br /><b className="text-xs text-gray-800">{formatCurrency(t.total)}</b></span>
+                    </div>
+                  );
+                })()}
                 <label className="mt-2 block text-[11px] text-gray-400">IMEI / Batch (one per line — edit or delete here)
                   <textarea className="input w-full font-mono text-xs" rows={Math.max(2, Math.min(6, imeiList(r.imeiText).length + 1))} placeholder="No IMEI — this item will be added as plain stock" value={r.imeiText} disabled={locked} onChange={(e) => patch(r.key, { imeiText: e.target.value, status: "pending", message: undefined })} />
                 </label>
