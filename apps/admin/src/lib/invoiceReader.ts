@@ -342,24 +342,22 @@ export async function readInvoiceFile(
 }
 
 /** Finds and decodes a QR code inside a photo (dense government e-invoice QRs included). */
-// Detection itself now runs through lib/scanner/engines.ts (native-then-zxing, the same engines
-// the IMEI scanner and the live invoice QR scanner use) instead of its own separate copy of that
-// logic. The multi-scale retry loop below is unchanged — a dense government e-invoice QR often
-// only decodes at a specific scale, so trying several is still worthwhile for a static photo.
+// Detection runs through lib/scanner/qrPhotoDecode.ts's staged pipeline (multi-scale, localized
+// crop, CLAHE-style local contrast + sharpen, adaptive threshold, small-angle deskew — each stage
+// only runs if the previous one found nothing), built on the same native+zxing engines the IMEI
+// scanner and the live invoice QR scanner use. See that file's header comment for what testing
+// against a real difficult invoice QR photo found actually helps versus not, and the explicit
+// note that no amount of resampling invents detail the camera didn't capture.
 export async function decodeQrFromImage(file: File): Promise<string | null> {
-  const { detectStaged } = await import("./scanner/engines");
-  const bmp = await createImageBitmap(file);
-  const tryScales = [1, 0.75, 0.5];
-  for (const sc of tryScales) {
-    const maxSide = 3200;
-    const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height)) * sc;
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(bmp.width * k));
-    canvas.height = Math.max(1, Math.round(bmp.height * k));
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(bmp, 0, 0, canvas.width, canvas.height);
-    const found = await detectStaged(ctx.getImageData(0, 0, canvas.width, canvas.height), ["qr_code"]);
-    if (found[0]?.text) return found[0].text;
+  const { decodeQrPhotoEnhanced } = await import("./scanner/qrPhotoDecode");
+  const result = await decodeQrPhotoEnhanced(file);
+  if (result.status === "decoded") return result.text;
+  if (result.status === "conflict") {
+    // Different stages decoded DIFFERENT payloads for the same photo — per the no-silent-accept
+    // rule, neither is used. This is extremely rare for QR (it carries its own Reed-Solomon error
+    // correction, so a clean decode is normally self-validating) but is still surfaced rather than
+    // guessed, exactly as required.
+    throw new Error(`Found ${result.candidates.length} different possible QR readings from this photo — none were used. Retake the photo closer and in focus.`);
   }
   return null;
 }

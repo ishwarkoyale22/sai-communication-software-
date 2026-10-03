@@ -1175,8 +1175,8 @@ export function Inventory() {
       const text = await decodeQrFromImage(file);
       if (text) await onInvoiceScanDecoded(text);
       else setInvoiceScanFeedback("No QR could be read from that photo. Retake it closer, with the whole QR in frame, in focus and without glare — or upload the invoice PDF via the button below.");
-    } catch {
-      setInvoiceScanFeedback("Could not read that photo.");
+    } catch (err) {
+      setInvoiceScanFeedback(err instanceof Error ? err.message : "Could not read that photo.");
     }
     if (invoicePhotoRef.current) invoicePhotoRef.current.value = "";
   }

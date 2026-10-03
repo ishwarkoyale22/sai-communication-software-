@@ -149,8 +149,8 @@ export function InvoiceImportModal({
                 ? "A QR was found but it is not a GST e-invoice QR."
                 : "The QR could not be read from this photo (e-invoice QRs are very dense — it is usually too small or blurry). For a QR, upload the invoice PDF or retake the photo close up with the QR filling the frame. The invoice details are read from the printed text instead; check them below."
             );
-        } catch {
-          notes.push("Could not check the photo for a QR.");
+        } catch (err) {
+          notes.push(err instanceof Error ? err.message : "Could not check the photo for a QR.");
         }
       }
       setReading("Reading items…");
